@@ -97,6 +97,38 @@ where:
 
 A higher K-factor means ratings update more quickly but can be more volatile. A lower K-factor means more stable ratings but slower adaptation to changes in fighter ability.
 
+#### Method of Victory Optimization
+
+G-Elo: Generalized Elo using margin of victory (Szczecinski), is a research paper that proposes a slight change to the Elo algorithm by incorporating margin of victory (MOV) rather than only win/loss. In the MMA case, we would want to include things like unanimous decision vs split decision vs submission. 
+
+##### Math change:
+
+Right now the update is: 
+
+$R_1' = R_1 + K*(S_1 - E_1)$
+$R_2' = R_2 + K*(S_2 - E_2)$
+
+Now we change K to be 
+
+$K_{\text{eff}} = K * M(fight)$ 
+
+$
+M(\text{fight}) =
+\begin{cases}
+1.00, & \text{decision} \\[6pt]
+1.10, & \text{TKO} \\[6pt]
+1.30, & \text{Submissionh} \\[6pt]
+0.9, & \text{Majority Decision} \\[6pt]
+0.60, & \text{Majority Decision} \\[6pt]
+\end{cases}
+$
+
+So the new update would be:
+
+$R_1' = R_1 + K_{\text{eff}}*(S_1 - E_1)$
+$R_2' = R_2 + K_{\text{eff}}*(S_2 - E_2)$
+
+
 #### Prediction
 
 We predict Fighter 1 wins if $R_1 > R_2$, and Fighter 2 wins otherwise. Predictions are only made when both fighters have at least one prior fight in the historical data.
