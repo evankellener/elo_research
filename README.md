@@ -72,9 +72,8 @@ The Elo rating system assigns each fighter a numerical rating that reflects thei
 
 Before a fight, we calculate the expected probability that Fighter 1 wins:
 
-$\[
-E_1 = \frac{1}{1 + 10^{(R_2 - R_1) / 400}}
-\]$
+$E_1 = \frac{1}{1 + 10^{(R_2 - R_1) / 400}}$
+
 
 where:
 - \(R_1\) is Fighter 1's current Elo rating
@@ -85,24 +84,22 @@ where:
 
 After the fight, ratings are updated:
 
-\[
-R_1^{new} = R_1^{old} + K \cdot (S_1 - E_1)
-\]
 
-\[
-R_2^{new} = R_2^{old} + K \cdot (S_2 - E_2)
-\]
+$R_1^{new} = R_1^{old} + K \cdot (S_1 - E_1)$
+
+
+$R_2^{new} = R_2^{old} + K \cdot (S_2 - E_2)$
 
 where:
-- \(S_1\) is the actual outcome (1 for Fighter 1 win, 0 for loss)
-- \(S_2 = 1 - S_1\)
-- \(K\) is the **K-factor** that determines how much ratings change after each fight
+- $S_1$ is the actual outcome (1 for Fighter 1 win, 0 for loss)
+- $S_2 = 1 - S_1$
+- $K$ is the **K-factor** that determines how much ratings change after each fight
 
 A higher K-factor means ratings update more quickly but can be more volatile. A lower K-factor means more stable ratings but slower adaptation to changes in fighter ability.
 
 #### Prediction
 
-We predict Fighter 1 wins if \(R_1 > R_2\), and Fighter 2 wins otherwise. Predictions are only made when both fighters have at least one prior fight in the historical data.
+We predict Fighter 1 wins if $R_1 > R_2$, and Fighter 2 wins otherwise. Predictions are only made when both fighters have at least one prior fight in the historical data.
 
 ### K-Factor Optimization
 
