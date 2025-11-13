@@ -105,29 +105,28 @@ G-Elo: Generalized Elo using margin of victory (Szczecinski), is a research pape
 
 Right now the update is: 
 
-$R_1' = R_1 + K*(S_1 - E_1)$
-$R_2' = R_2 + K*(S_2 - E_2)$
+$$R_1' = R_1 + K*(S_1 - E_1)$$
+$$R_2' = R_2 + K*(S_2 - E_2)$$
 
 Now we change K to be 
 
 $K_{\text{eff}} = K * M(fight)$ 
 
 
-\[
+$$
 M(\text{fight}) =
 \begin{cases}
-1.00, & \text{Decision} \\[6pt]
-1.10, & \text{TKO} \\[6pt]
-1.30, & \text{Submission} \\[6pt]
-0.90, & \text{Majority Decision} \\[6pt]
+1.00, & \text{Decision} \\
+1.10, & \text{TKO} \\
+1.30, & \text{Submission} \\
+0.90, & \text{Majority Decision} \\
 0.60, & \text{Split Decision}
 \end{cases}
-\]
-
+$$
 So the new update would be:
 
-$R_1' = R_1 + K_{\text{eff}}*(S_1 - E_1)$
-$R_2' = R_2 + K_{\text{eff}}*(S_2 - E_2)$
+$$R_1' = R_1 + K_{\text{eff}}*(S_1 - E_1)$$
+$$R_2' = R_2 + K_{\text{eff}}*(S_2 - E_2)$$
 
 
 #### Prediction
