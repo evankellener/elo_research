@@ -127,6 +127,7 @@ $$
 So the new update would be:
 
 $R_1' = R_1 + K_{\text{eff}}*(S_1 - E_1)$
+
 $R_2' = R_2 + K_{\text{eff}}*(S_2 - E_2)$
 
 
