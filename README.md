@@ -113,7 +113,8 @@ Now we change K to be
 ### $K_{\text{eff}} = K * M(fight)$ 
 
 
-### $$
+### 
+$$
 M(\text{fight}) =
 \begin{cases}
 1.00, & \text{Decision} \\
