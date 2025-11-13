@@ -112,16 +112,15 @@ Now we change K to be
 
 $K_{\text{eff}} = K * M(fight)$ 
 
-$
-M(\text{fight}) =
+
+$M(\text{fight}) =
 \begin{cases}
 1.00, & \text{decision} \\[6pt]
 1.10, & \text{TKO} \\[6pt]
 1.30, & \text{Submissionh} \\[6pt]
 0.9, & \text{Majority Decision} \\[6pt]
 0.60, & \text{Majority Decision} \\[6pt]
-\end{cases}
-$
+\end{cases}$
 
 So the new update would be:
 
