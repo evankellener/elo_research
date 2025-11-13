@@ -72,7 +72,7 @@ The Elo rating system assigns each fighter a numerical rating that reflects thei
 
 Before a fight, we calculate the expected probability that Fighter 1 wins:
 
-$E_1 = \frac{1}{1 + 10^{(R_2 - R_1) / 400}}$
+### $E_1 = \frac{1}{1 + 10^{(R_2 - R_1) / 400}}$
 
 
 where:
