@@ -76,8 +76,8 @@ Before a fight, we calculate the expected probability that Fighter 1 wins:
 
 
 where:
-- \(R_1\) is Fighter 1's current Elo rating
-- \(R_2\) is Fighter 2's current Elo rating
+- $R_1$ is Fighter 1's current Elo rating
+- $R_2$ is Fighter 2's current Elo rating
 - The denominator (400) controls the sensitivity: a 400-point difference means one fighter is 10x more likely to win
 
 #### Rating Updates
@@ -85,10 +85,10 @@ where:
 After the fight, ratings are updated:
 
 
-$R_1^{new} = R_1^{old} + K \cdot (S_1 - E_1)$
+### $R_1^{new} = R_1^{old} + K \cdot (S_1 - E_1)$
 
 
-$R_2^{new} = R_2^{old} + K \cdot (S_2 - E_2)$
+### $R_2^{new} = R_2^{old} + K \cdot (S_2 - E_2)$
 
 where:
 - $S_1$ is the actual outcome (1 for Fighter 1 win, 0 for loss)
@@ -105,15 +105,15 @@ G-Elo: Generalized Elo using margin of victory (Szczecinski), is a research pape
 
 Right now the update is: 
 
-$$R_1' = R_1 + K*(S_1 - E_1)$$
-$$R_2' = R_2 + K*(S_2 - E_2)$$
+### $$R_1' = R_1 + K*(S_1 - E_1)$$
+### $$R_2' = R_2 + K*(S_2 - E_2)$$
 
 Now we change K to be 
 
-$K_{\text{eff}} = K * M(fight)$ 
+### $K_{\text{eff}} = K * M(fight)$ 
 
 
-$$
+### $$
 M(\text{fight}) =
 \begin{cases}
 1.00, & \text{Decision} \\
