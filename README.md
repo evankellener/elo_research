@@ -188,17 +188,42 @@ We compared the Elo rating system with and without Method of Victory weights to 
 
 The results show that incorporating Method of Victory weights provides meaningful improvements, particularly in out-of-sample accuracy, demonstrating better generalization to future fights.
 
-#### K Parameter Optimization
+#### K Parameter Optimization and MOV Comparison
 
-The following plot shows how different K values affect three accuracy metrics: Overall Accuracy, Test Accuracy (Future), and Out-of-Sample Accuracy.
+The following plot compares the Elo rating system with and without Method of Victory (MOV) weights across different K values:
 
-![K Optimization Accuracy Plot](k_optimization_accuracy_plot.png)
+![MOV Comparison Plot](mov_comparison_plot.png)
 
-Key observations:
-- **Out-of-Sample Accuracy** peaks at lower K values (around 50-150), achieving ~63% accuracy
-- **Test Accuracy** and **Overall Accuracy** peak at higher K values (around 150-250), achieving ~58% accuracy
-- For K values above 250, all three metrics converge and stabilize around 57-58%
-- The optimal K value differs between MOV and No MOV versions, with MOV preferring lower K values (170 vs 250)
+**Plot Breakdown:**
+
+The visualization consists of four subplots comparing MOV vs No MOV across different accuracy metrics:
+
+1. **Top-Left: Overall Accuracy**
+   - Both "With MOV" (blue circles) and "Without MOV" (orange squares) lines are nearly identical
+   - Both consistently hover around 0.56-0.57 accuracy across all K values
+   - **Finding**: MOV has negligible impact on overall accuracy
+
+2. **Top-Right: Test Accuracy (Future)**
+   - "With MOV" (blue circles) peaks around 0.58-0.59 for K values 150-200
+   - "Without MOV" (orange squares) peaks around 0.58 for K values 200-250
+   - "With MOV" maintains slightly better performance in the optimal K range
+   - **Finding**: MOV provides a modest improvement in test accuracy, with MOV preferring lower K values
+
+3. **Bottom-Left: Out-of-Sample Accuracy**
+   - "With MOV" (blue triangles) shows a strong peak of ~0.63-0.64 for K values 180-280
+   - "Without MOV" (orange inverted triangles) drops sharply to ~0.52-0.53 for K values 180-200, then recovers to ~0.58-0.59
+   - **Finding**: MOV demonstrates a clear advantage in out-of-sample accuracy, achieving substantially higher peak performance where No MOV performs poorly
+
+4. **Bottom-Right: All Metrics Combined**
+   - Provides a consolidated view of all six accuracy metrics
+   - Clearly shows that MOV's primary benefit is in out-of-sample accuracy
+   - The OOS accuracy divergence is the most pronounced difference between the two approaches
+
+**Key Takeaways:**
+- MOV has minimal impact on overall accuracy but provides meaningful improvements in test and out-of-sample accuracy
+- The optimal K value differs: MOV performs best at K=170, while No MOV performs best at K=250
+- MOV is particularly effective for predicting truly unseen events (out-of-sample), achieving up to 63% accuracy compared to No MOV's peak of ~60%
+- The improvement is most pronounced in the K range of 180-280, where MOV maintains high OOS accuracy while No MOV experiences a performance dip
 
 ## Requirements
 
