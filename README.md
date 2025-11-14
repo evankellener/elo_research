@@ -15,6 +15,7 @@ This project implements an Elo rating system to predict fight outcomes. It inclu
 
 - `main.py` - Main Elo implementation with visualization functions
 - `genetic_algorithm_k.py` - Genetic algorithm for K-factor optimization and out-of-sample testing
+- `optimal_k_with_mov.py` - K-factor optimization with Method of Victory (MOV) comparison and visualization
 - `interleaved_cleaned.csv` - Historical fight data for training
 - `past3_events.csv` - Recent events for out-of-sample testing
 
@@ -41,6 +42,11 @@ python main.py
 Run the genetic algorithm optimization:
 ```bash
 python genetic_algorithm_k.py
+```
+
+Run the MOV comparison analysis (compares Elo with and without Method of Victory weights):
+```bash
+python optimal_k_with_mov.py
 ```
 
 ### Updating GitHub Repository
@@ -116,11 +122,11 @@ Now we change K to be
 $$
 M(\text{fight}) =
 \begin{cases}
-1.00, & \text{Decision} \\
-1.10, & \text{TKO} \\
+1.40, & \text{KO/TKO} \\
 1.30, & \text{Submission} \\
+1.00, & \text{Unanimous Decision} \\
 0.90, & \text{Majority Decision} \\
-0.60, & \text{Split Decision}
+0.70, & \text{Split Decision}
 \end{cases}
 $$
 
@@ -158,10 +164,45 @@ Despite the name "genetic_algorithm_k", the code actually performs a **grid sear
 
 This approach helps prevent overfitting: by optimizing K based on future accuracy within the historical data, we select a K-factor that generalizes well to truly unseen events.
 
+## Results
+
+### Method of Victory (MOV) Impact
+
+We compared the Elo rating system with and without Method of Victory weights to evaluate the impact of incorporating fight outcome decisiveness into the rating updates.
+
+#### Summary Comparison
+
+**WITH MOV:**
+- Best K: 170
+- Best Test Accuracy: 0.5861
+- OOS Accuracy (at best K): 0.6053
+
+**WITHOUT MOV:**
+- Best K: 250
+- Best Test Accuracy: 0.5789
+- OOS Accuracy (at best K): 0.5789
+
+**MOV Improvement:**
+- Test Accuracy: +0.0072 (1.2% improvement)
+- OOS Accuracy: +0.0264 (4.6% improvement)
+
+The results show that incorporating Method of Victory weights provides meaningful improvements, particularly in out-of-sample accuracy, demonstrating better generalization to future fights.
+
+#### K Parameter Optimization
+
+The following plot shows how different K values affect three accuracy metrics: Overall Accuracy, Test Accuracy (Future), and Out-of-Sample Accuracy.
+
+![K Optimization Accuracy Plot](k_optimization_accuracy_plot.png)
+
+Key observations:
+- **Out-of-Sample Accuracy** peaks at lower K values (around 50-150), achieving ~63% accuracy
+- **Test Accuracy** and **Overall Accuracy** peak at higher K values (around 150-250), achieving ~58% accuracy
+- For K values above 250, all three metrics converge and stabilize around 57-58%
+- The optimal K value differs between MOV and No MOV versions, with MOV preferring lower K values (170 vs 250)
+
 ## Requirements
 
 - Python 3.7+
 - pandas
 - matplotlib
 - numpy
-
