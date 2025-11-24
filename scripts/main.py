@@ -399,6 +399,183 @@ def display_roi_metrics(roi_results):
     print("="*60)
 
 
+def compute_roi_over_time(roi_results, group_by='event'):
+    """
+    Calculate ROI over time, broken down by event or time period.
+    
+    Args:
+        roi_results: Dictionary returned by compute_roi_predictions() containing 'records' DataFrame
+        group_by: How to group results - 'event' (by date/event), 'month', or 'year'
+    
+    Returns:
+        DataFrame with cumulative ROI metrics over time
+    """
+    records_df = roi_results.get('records')
+    if records_df is None or records_df.empty:
+        return pd.DataFrame()
+    
+    # Sort by date
+    records_df = records_df.copy()
+    records_df['date'] = pd.to_datetime(records_df['date'])
+    records_df = records_df.sort_values('date')
+    
+    # Create grouping column based on group_by parameter
+    if group_by == 'month':
+        records_df['period'] = records_df['date'].dt.to_period('M').astype(str)
+    elif group_by == 'year':
+        records_df['period'] = records_df['date'].dt.year.astype(str)
+    else:  # 'event' - group by date (each event)
+        records_df['period'] = records_df['date'].dt.date.astype(str)
+    
+    # Calculate metrics by period
+    period_stats = records_df.groupby('period').agg({
+        'bet_amount': 'sum',
+        'payout': 'sum',
+        'profit': 'sum',
+        'bet_won': ['sum', 'count', 'mean'],
+        'expected_prob': 'mean'
+    }).reset_index()
+    
+    # Flatten column names
+    period_stats.columns = ['period', 'wagered', 'returned', 'profit', 
+                           'wins', 'bets', 'accuracy', 'avg_expected_prob']
+    
+    # Calculate period ROI
+    period_stats['roi_percent'] = (period_stats['profit'] / period_stats['wagered']) * 100
+    
+    # Calculate cumulative metrics
+    period_stats['cumulative_wagered'] = period_stats['wagered'].cumsum()
+    period_stats['cumulative_returned'] = period_stats['returned'].cumsum()
+    period_stats['cumulative_profit'] = period_stats['profit'].cumsum()
+    period_stats['cumulative_roi'] = (period_stats['cumulative_profit'] / period_stats['cumulative_wagered']) * 100
+    period_stats['cumulative_bets'] = period_stats['bets'].cumsum()
+    period_stats['cumulative_wins'] = period_stats['wins'].cumsum()
+    period_stats['cumulative_accuracy'] = period_stats['cumulative_wins'] / period_stats['cumulative_bets']
+    
+    return period_stats
+
+
+def display_roi_over_time(roi_over_time_df, show_all=False):
+    """
+    Display ROI over time in a formatted table.
+    
+    Args:
+        roi_over_time_df: DataFrame returned by compute_roi_over_time()
+        show_all: If True, show all periods. If False, show summary (first 5, last 5)
+    """
+    if roi_over_time_df.empty:
+        print("No ROI data to display.")
+        return
+    
+    print("\n" + "="*100)
+    print("ROI OVER TIME - Cumulative Performance")
+    print("="*100)
+    
+    # Format for display
+    display_cols = ['period', 'bets', 'wins', 'accuracy', 'profit', 'roi_percent', 
+                    'cumulative_bets', 'cumulative_profit', 'cumulative_roi']
+    
+    df_display = roi_over_time_df[display_cols].copy()
+    df_display['accuracy'] = df_display['accuracy'].apply(lambda x: f"{x*100:.1f}%")
+    df_display['roi_percent'] = df_display['roi_percent'].apply(lambda x: f"{x:.2f}%")
+    df_display['cumulative_roi'] = df_display['cumulative_roi'].apply(lambda x: f"{x:.2f}%")
+    df_display['profit'] = df_display['profit'].apply(lambda x: f"${x:.2f}")
+    df_display['cumulative_profit'] = df_display['cumulative_profit'].apply(lambda x: f"${x:.2f}")
+    
+    df_display.columns = ['Period', 'Bets', 'Wins', 'Accuracy', 'Profit', 'ROI%', 
+                          'Total Bets', 'Total Profit', 'Cumulative ROI%']
+    
+    if show_all or len(df_display) <= 15:
+        print(df_display.to_string(index=False))
+    else:
+        # Show first 5 and last 5
+        print("First 5 events:")
+        print(df_display.head(5).to_string(index=False))
+        print(f"\n... ({len(df_display) - 10} events hidden) ...\n")
+        print("Last 5 events:")
+        print(df_display.tail(5).to_string(index=False))
+    
+    print("="*100)
+    
+    # Summary statistics
+    final_row = roi_over_time_df.iloc[-1]
+    print(f"\nFinal Summary:")
+    print(f"  Total Events: {len(roi_over_time_df)}")
+    print(f"  Total Bets: {int(final_row['cumulative_bets'])}")
+    print(f"  Total Profit: ${final_row['cumulative_profit']:.2f}")
+    print(f"  Final Cumulative ROI: {final_row['cumulative_roi']:.2f}%")
+    print(f"  Final Cumulative Accuracy: {final_row['cumulative_accuracy']*100:.2f}%")
+    
+    # Calculate streak info (use local calculation to avoid modifying input DataFrame)
+    profitable_events = (roi_over_time_df['profit'] > 0).sum()
+    losing_events = len(roi_over_time_df) - profitable_events
+    print(f"\n  Profitable Events: {profitable_events} ({profitable_events/len(roi_over_time_df)*100:.1f}%)")
+    print(f"  Losing Events: {losing_events} ({losing_events/len(roi_over_time_df)*100:.1f}%)")
+
+
+def plot_roi_over_time(roi_over_time_df, save_path=None):
+    """
+    Plot ROI over time.
+    
+    Args:
+        roi_over_time_df: DataFrame returned by compute_roi_over_time()
+        save_path: Optional path to save the plot
+    """
+    if roi_over_time_df.empty:
+        print("No ROI data to plot.")
+        return
+    
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    
+    # Plot 1: Cumulative ROI over time
+    ax1 = axes[0, 0]
+    ax1.plot(range(len(roi_over_time_df)), roi_over_time_df['cumulative_roi'], 'b-', linewidth=2)
+    ax1.axhline(y=0, color='r', linestyle='--', alpha=0.5)
+    ax1.set_xlabel('Event Number')
+    ax1.set_ylabel('Cumulative ROI (%)')
+    ax1.set_title('Cumulative ROI Over Time')
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Cumulative Profit over time
+    ax2 = axes[0, 1]
+    ax2.fill_between(range(len(roi_over_time_df)), roi_over_time_df['cumulative_profit'], 
+                     alpha=0.3, color='blue')
+    ax2.plot(range(len(roi_over_time_df)), roi_over_time_df['cumulative_profit'], 'b-', linewidth=2)
+    ax2.axhline(y=0, color='r', linestyle='--', alpha=0.5)
+    ax2.set_xlabel('Event Number')
+    ax2.set_ylabel('Cumulative Profit ($)')
+    ax2.set_title('Cumulative Profit Over Time')
+    ax2.grid(True, alpha=0.3)
+    
+    # Plot 3: Per-event ROI (bar chart)
+    ax3 = axes[1, 0]
+    colors = ['green' if r >= 0 else 'red' for r in roi_over_time_df['roi_percent']]
+    ax3.bar(range(len(roi_over_time_df)), roi_over_time_df['roi_percent'], color=colors, alpha=0.7)
+    ax3.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+    ax3.set_xlabel('Event Number')
+    ax3.set_ylabel('ROI (%)')
+    ax3.set_title('Per-Event ROI')
+    ax3.grid(True, alpha=0.3, axis='y')
+    
+    # Plot 4: Cumulative Accuracy over time
+    ax4 = axes[1, 1]
+    ax4.plot(range(len(roi_over_time_df)), roi_over_time_df['cumulative_accuracy'] * 100, 'g-', linewidth=2)
+    ax4.axhline(y=50, color='r', linestyle='--', alpha=0.5, label='50% baseline')
+    ax4.set_xlabel('Event Number')
+    ax4.set_ylabel('Cumulative Accuracy (%)')
+    ax4.set_title('Cumulative Accuracy Over Time')
+    ax4.grid(True, alpha=0.3)
+    ax4.legend()
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Plot saved to {save_path}")
+    
+    plt.show()
+
+
 def compare_odds_sources(odds_df):
     """
     Compare different odds sources (avg_odds, draftkings_odds, fanduel_odds, betmgm_odds)
@@ -810,6 +987,16 @@ if __name__ == "__main__":
     # Merge odds from after_averaging.csv into df
     roi_results = compute_roi_predictions(df, odds_df=odds_df)
     display_roi_metrics(roi_results)
+    
+    # ROI Over Time Analysis - track performance by event
+    print("\n" + "="*60)
+    print("ROI OVER TIME ANALYSIS")
+    print("="*60)
+    roi_over_time = compute_roi_over_time(roi_results, group_by='event')
+    display_roi_over_time(roi_over_time, show_all=False)
+    
+    # Plot ROI over time
+    plot_roi_over_time(roi_over_time, save_path='images/roi_over_time.png')
     
     # Compare different odds sources (avg_odds, draftkings_odds, fanduel_odds, betmgm_odds)
     print("\n" + "="*60)
