@@ -399,6 +399,154 @@ def display_roi_metrics(roi_results):
     print("="*60)
 
 
+def compare_odds_sources(odds_df):
+    """
+    Compare different odds sources (avg_odds, draftkings_odds, fanduel_odds, betmgm_odds)
+    in terms of accuracy, log loss, and brier score.
+    
+    This function evaluates how well each sportsbook's odds predict fight outcomes
+    by calculating implied probabilities from the odds.
+    
+    Note: The prediction logic uses a 0.5 implied probability threshold, which doesn't
+    account for the vig (sportsbook margin) built into odds. This is a simplification
+    that assumes the favorite (implied probability > 50%) should win.
+    
+    Args:
+        odds_df: DataFrame with fight data including various odds columns and result column
+    
+    Returns:
+        dict: Dictionary containing metrics for each odds source
+    """
+    odds_sources = ['avg_odds', 'draftkings_odds', 'fanduel_odds', 'betmgm_odds']
+    results = {}
+    
+    # Normalize dates
+    df = odds_df.copy()
+    df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+    df['result'] = pd.to_numeric(df['result'], errors='coerce')
+    
+    for odds_col in odds_sources:
+        if odds_col not in df.columns:
+            print(f"Warning: {odds_col} not found in DataFrame")
+            continue
+        
+        records = []
+        processed_fights = set()  # Track unique fights per odds source
+        
+        for _, row in df.iterrows():
+            # Skip invalid results
+            if row['result'] not in (0, 1):
+                continue
+            if pd.isna(row['DATE']):
+                continue
+            if pd.isna(row.get(odds_col)):
+                continue
+            
+            # Create unique fight key
+            fight_key = tuple(sorted([row['FIGHTER'], row['opp_FIGHTER']])) + (str(row['DATE']),)
+            
+            if fight_key in processed_fights:
+                continue
+            processed_fights.add(fight_key)
+            
+            # Get odds for this fighter
+            odds = row[odds_col]
+            decimal_odds = american_odds_to_decimal(odds)
+            if decimal_odds is None or decimal_odds <= 1:
+                continue
+            
+            # Calculate implied probability from odds
+            # Implied probability = 1 / decimal_odds
+            implied_prob = 1 / decimal_odds
+            
+            # Actual result: 1 = this fighter won, 0 = this fighter lost
+            actual_result = int(row['result'])
+            
+            # Prediction: if implied_prob > 0.5, odds favor this fighter winning
+            predicted = 1 if implied_prob > 0.5 else 0
+            
+            records.append({
+                'fighter': row['FIGHTER'],
+                'opponent': row['opp_FIGHTER'],
+                'date': row['DATE'],
+                'odds': odds,
+                'implied_prob': implied_prob,
+                'predicted': predicted,
+                'result': actual_result,
+                'correct': int(predicted == actual_result)
+            })
+        
+        if not records:
+            results[odds_col] = {
+                'total_fights': 0,
+                'accuracy': None,
+                'log_loss': None,
+                'brier_score': None
+            }
+            continue
+        
+        records_df = pd.DataFrame(records)
+        
+        # Calculate accuracy
+        accuracy = records_df['correct'].mean()
+        
+        # Calculate Log Loss
+        epsilon = 1e-10
+        implied_probs = records_df['implied_prob'].clip(epsilon, 1 - epsilon)
+        actual_results = records_df['result']
+        log_loss = -np.mean(
+            actual_results * np.log(implied_probs) + 
+            (1 - actual_results) * np.log(1 - implied_probs)
+        )
+        
+        # Calculate Brier Score
+        brier_score = np.mean((implied_probs - actual_results) ** 2)
+        
+        results[odds_col] = {
+            'total_fights': len(records),
+            'accuracy': accuracy,
+            'log_loss': log_loss,
+            'brier_score': brier_score,
+            'records': records_df
+        }
+    
+    return results
+
+
+def display_odds_comparison(comparison_results):
+    """
+    Display comparison of different odds sources in a formatted table.
+    
+    Args:
+        comparison_results: Dictionary returned by compare_odds_sources()
+    """
+    print("\n" + "="*90)
+    print("ODDS SOURCE COMPARISON - Accuracy, Log Loss, and Brier Score")
+    print("="*90)
+    print(f"\n{'Odds Source':<20} {'Fights':<10} {'Accuracy':<25} {'Log Loss':<15} {'Brier Score':<15}")
+    print("-"*90)
+    
+    for source, metrics in comparison_results.items():
+        if metrics['accuracy'] is None:
+            print(f"{source:<20} {'N/A':<10} {'N/A':<25} {'N/A':<15} {'N/A':<15}")
+        else:
+            accuracy_str = f"{metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)"
+            print(f"{source:<20} {metrics['total_fights']:<10} {accuracy_str:<25} {metrics['log_loss']:<15.4f} {metrics['brier_score']:<15.4f}")
+    
+    print("="*90)
+    
+    # Find best performers
+    valid_results = {k: v for k, v in comparison_results.items() if v['accuracy'] is not None}
+    if valid_results:
+        best_accuracy = max(valid_results.items(), key=lambda x: x[1]['accuracy'])
+        best_log_loss = min(valid_results.items(), key=lambda x: x[1]['log_loss'])
+        best_brier = min(valid_results.items(), key=lambda x: x[1]['brier_score'])
+        
+        print(f"\nBest Accuracy: {best_accuracy[0]} ({best_accuracy[1]['accuracy']*100:.2f}%)")
+        print(f"Best Log Loss: {best_log_loss[0]} ({best_log_loss[1]['log_loss']:.4f})")
+        print(f"Best Brier Score: {best_brier[0]} ({best_brier[1]['brier_score']:.4f})")
+
+
 def display_top_n_elos(df, n=10):
     #display the top n postcomp_elo values byt fighter
     # dont' display multiple instances of the same fighter
@@ -662,3 +810,10 @@ if __name__ == "__main__":
     # Merge odds from after_averaging.csv into df
     roi_results = compute_roi_predictions(df, odds_df=odds_df)
     display_roi_metrics(roi_results)
+    
+    # Compare different odds sources (avg_odds, draftkings_odds, fanduel_odds, betmgm_odds)
+    print("\n" + "="*60)
+    print("COMPARING ODDS SOURCES")
+    print("="*60)
+    comparison_results = compare_odds_sources(odds_df)
+    display_odds_comparison(comparison_results)
