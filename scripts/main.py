@@ -1409,8 +1409,15 @@ def display_detailed_event_analysis(event_analyses):
                 fighter_elo_str = f"{fight['fighter_pre_elo']:.0f}" if fight['fighter_pre_elo'] is not None else "N/A"
                 opp_elo_str = f"{fight['opp_pre_elo']:.0f}" if fight['opp_pre_elo'] is not None else "N/A"
                 
-                # Format odds (American)
-                odds_str = f"{fight['avg_odds_american']:+.0f}" if pd.notna(fight.get('avg_odds_american')) else "N/A"
+                # Format odds (American) - convert to float if it's a string
+                if pd.notna(fight.get('avg_odds_american')):
+                    try:
+                        odds_value = float(fight['avg_odds_american'])
+                        odds_str = f"{odds_value:+.0f}"
+                    except (ValueError, TypeError):
+                        odds_str = str(fight['avg_odds_american'])
+                else:
+                    odds_str = "N/A"
                 
                 # Winner indicator
                 winner_str = fight['winner'][:10] if len(fight['winner']) > 10 else fight['winner']
