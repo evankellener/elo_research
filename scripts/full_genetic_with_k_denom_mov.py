@@ -1198,12 +1198,15 @@ if __name__ == "__main__":
         df["opp_precomp_boutcount"] = pd.to_numeric(df["opp_precomp_boutcount"], errors="coerce")
 
     print(f"Test data date range: {test_df['date'].min()} to {test_df['date'].max()}")
+    print(f"Running in mode: {args.mode}")
+    print(f"Mode check: args.mode == 'roi' is {args.mode == 'roi'}")
 
     if args.mode == "roi":
         print("\n" + "="*60)
         print("ROI-BASED GENETIC ALGORITHM OPTIMIZATION")
         print("="*60)
         print("Optimizing parameters to maximize ROI on past year of fights")
+        print("Calling ga_search_params_roi()...")
         
         # Run ROI-based GA search
         best_params, best_roi = ga_search_params_roi(
@@ -1265,6 +1268,7 @@ if __name__ == "__main__":
         print("\n" + "="*60)
         print("ACCURACY-BASED GENETIC ALGORITHM OPTIMIZATION")
         print("="*60)
+        print("Calling ga_search_params()...")
         
         # Run GA search over k and MoV weights
         best_params, best_future_acc, cutoff = ga_search_params(
