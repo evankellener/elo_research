@@ -1213,6 +1213,19 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
             if fighter_pre_elo is not None and opp_pre_elo is not None:
                 elo_diff = abs(fighter_pre_elo - opp_pre_elo)
             
+            # Determine reason why bet wasn't placed
+            # At this point, the fight passed all filtering criteria (valid result, prior history, Elo)
+            # The reason it wasn't bet on is either:
+            # 1. No odds available
+            # 2. Equal Elo ratings (can't determine which fighter to bet on)
+            # 3. Other filtering in compute_roi_predictions
+            if not odds_data.get('avg_odds'):
+                reason_no_bet = 'No odds available'
+            elif fighter_pre_elo == opp_pre_elo:
+                reason_no_bet = 'Equal Elo ratings'
+            else:
+                reason_no_bet = 'Odds data mismatch'
+            
             fight_details = {
                 'fighter': fighter,
                 'opponent': opponent,
@@ -1233,7 +1246,7 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
                 'fanduel_odds': odds_data.get('fanduel_odds'),
                 'betmgm_odds': odds_data.get('betmgm_odds'),
                 'bet_placed': False,
-                'reason_no_bet': 'No odds available' if not odds_data.get('avg_odds') else 'Filtered out'
+                'reason_no_bet': reason_no_bet
             }
             other_fights_list.append(fight_details)
         
