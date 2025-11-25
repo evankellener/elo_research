@@ -165,10 +165,10 @@ def american_odds_to_decimal(odds):
       Decimal = (100 / |odds|) + 1 = (100/200) + 1 = 1.50
     
     Args:
-        odds: American odds value (positive or negative float)
+        odds: American odds value (positive or negative float, or string representation)
     
     Returns:
-        Decimal odds value, or None if input is NaN
+        Decimal odds value, or None if input is NaN or cannot be converted
     
     Examples:
         >>> american_odds_to_decimal(150)   # +150 underdog
@@ -178,6 +178,13 @@ def american_odds_to_decimal(odds):
     """
     if pd.isna(odds):
         return None
+    
+    # Convert to float if it's a string
+    try:
+        odds = float(odds)
+    except (ValueError, TypeError):
+        return None
+    
     if odds > 0:
         return (odds / 100) + 1
     else:
@@ -1207,8 +1214,15 @@ def display_detailed_event_analysis(event_analyses):
             pre_elo_str = f"{bet['bet_on_pre_elo']:.0f}" if bet['bet_on_pre_elo'] is not None else "N/A"
             opp_elo_str = f"{bet['bet_against_pre_elo']:.0f}" if bet['bet_against_pre_elo'] is not None else "N/A"
             
-            # Format odds (American)
-            odds_str = f"{bet['avg_odds_american']:+.0f}" if pd.notna(bet['avg_odds_american']) else "N/A"
+            # Format odds (American) - convert to float if it's a string
+            if pd.notna(bet['avg_odds_american']):
+                try:
+                    odds_value = float(bet['avg_odds_american'])
+                    odds_str = f"{odds_value:+.0f}"
+                except (ValueError, TypeError):
+                    odds_str = str(bet['avg_odds_american'])
+            else:
+                odds_str = "N/A"
             
             # Result indicator
             result_str = "WIN" if bet['bet_won'] else "LOSS"
@@ -1307,13 +1321,13 @@ if __name__ == "__main__":
     '''
 
     #plot the elo history for a given fighter
-    graph_fighter_elo_history(df, fighter = 'Hamdy Abdelwahab')
+    #graph_fighter_elo_history(df, fighter = 'Hamdy Abdelwahab')
 
-    most_recent_elo_df = most_recent_elo_by_fighter(df, fighter = 'Hamdy Abdelwahab')
+    most_recent_elo_df = most_recent_elo_by_fighter(df, fighter = 'Alexa Grasso')
     most_recent_elo_df.to_csv('data/most_recent_elo.csv', index=False)
 
     graph_fighter_elo_history(df, fighter = 'Chris Barnett')
-    most_recent_elo_df = most_recent_elo_by_fighter(df, fighter = 'Chris Barnett')
+    most_recent_elo_df = most_recent_elo_by_fighter(df, fighter = 'Natalia Silva')
     most_recent_elo_df.to_csv('data/most_recent_elo.csv', index=False)
     
     # ROI Calculator - uses Elo from main.py calculations, odds from after_averaging.csv
