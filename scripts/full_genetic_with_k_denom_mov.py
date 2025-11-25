@@ -424,6 +424,471 @@ def evaluate_params(df, cutoff_date, params):
     return acc_future
 
 
+# =========================
+# ROI-based fitness helpers
+# =========================
+
+def american_odds_to_decimal(odds):
+    """
+    Convert American odds to decimal odds.
+    
+    American odds format:
+    - Positive odds (e.g., +150): Profit from a $100 bet. +150 means win $150 on $100.
+      Decimal = (odds / 100) + 1 = (150/100) + 1 = 2.50
+    - Negative odds (e.g., -200): Amount to bet to win $100. -200 means bet $200 to win $100.
+      Decimal = (100 / |odds|) + 1 = (100/200) + 1 = 1.50
+    
+    Args:
+        odds: American odds value (positive or negative float, or string representation)
+    
+    Returns:
+        Decimal odds value, or None if input is NaN or cannot be converted
+    """
+    if pd.isna(odds):
+        return None
+    
+    # Convert to float if it's a string
+    try:
+        odds = float(odds)
+    except (ValueError, TypeError):
+        return None
+    
+    if odds > 0:
+        return (odds / 100) + 1
+    else:
+        return (100 / abs(odds)) + 1
+
+
+def build_bidirectional_odds_lookup(odds_df):
+    """
+    Build a bidirectional odds lookup dictionary from odds data.
+    
+    This creates lookup entries for both (fighter, opponent, date) and
+    (opponent, fighter, date) so that odds can be found regardless of
+    which fighter has the higher Elo rating.
+    
+    IMPORTANT: The odds_df should contain rows for BOTH fighters in each fight,
+    with each fighter's correct odds in their respective row. For example:
+    - Row 1: FIGHTER='Fighter A', opp_FIGHTER='Fighter B', avg_odds=-150 (A is favorite)
+    - Row 2: FIGHTER='Fighter B', opp_FIGHTER='Fighter A', avg_odds=+120 (B is underdog)
+    
+    If odds_df only has one row per fight, the reverse key will fall back to
+    using the same odds, which may not be accurate for ROI calculations.
+    
+    Args:
+        odds_df: DataFrame with DATE, FIGHTER, opp_FIGHTER, and avg_odds columns
+    
+    Returns:
+        dict: Mapping (fighter, opponent, date_str) -> avg_odds value for that fighter
+    """
+    odds_lookup = {}
+    
+    for _, row in odds_df.iterrows():
+        if pd.notna(row.get('avg_odds')):
+            date_str = str(pd.to_datetime(row['DATE']).date())
+            key = (row['FIGHTER'], row['opp_FIGHTER'], date_str)
+            odds_lookup[key] = row['avg_odds']
+    
+    return odds_lookup
+
+
+def evaluate_params_roi(df, odds_df, params, lookback_days=365):
+    """
+    Run Elo with given params and return ROI% for recent fights.
+    
+    This function:
+    1. Trains Elo model on ALL historical data using the candidate parameters
+    2. Calculates ROI by simulating $1 bets on the higher-rated fighter for recent fights
+    3. Returns ROI% as the fitness metric
+    
+    Args:
+        df: Training data (all historical fight data with DATE, FIGHTER, opp_FIGHTER, result)
+        odds_df: Odds data with DATE, FIGHTER, opp_FIGHTER, avg_odds columns
+        params: Dict with k, w_ko, w_sub, w_udec, w_sdec, w_mdec
+        lookback_days: Number of days to look back for ROI calculation (default 365)
+                       Set to 0 or None to use all data
+    
+    Returns:
+        float: ROI percentage (0 if no valid bets)
+    """
+    mov_params = {
+        "w_ko":   params["w_ko"],
+        "w_sub":  params["w_sub"],
+        "w_udec": params["w_udec"],
+        "w_sdec": params["w_sdec"],
+        "w_mdec": params["w_mdec"],
+    }
+    k = params["k"]
+    
+    # Train Elo on ALL historical data
+    df_with_elo = run_basic_elo(df.copy(), k=k, mov_params=mov_params)
+    
+    # Filter to recent fights if requested
+    if lookback_days and lookback_days > 0:
+        max_date = df_with_elo["DATE"].max()
+        cutoff_date = max_date - pd.Timedelta(days=lookback_days)
+        test_df = df_with_elo[df_with_elo["DATE"] > cutoff_date].copy()
+    else:
+        test_df = df_with_elo.copy()
+    
+    # Build bidirectional odds lookup
+    odds_lookup = build_bidirectional_odds_lookup(odds_df)
+    
+    # Build fighter history for prior fight check
+    hist = build_fighter_history(df_with_elo)
+    first_dates = hist.groupby("fighter")["date"].min().to_dict()
+    
+    # Calculate ROI
+    total_wagered = 0.0
+    total_profit = 0.0
+    processed_fights = set()  # Track unique fights to avoid double counting
+    
+    for _, row in test_df.iterrows():
+        # Skip invalid results
+        result = row["result"]
+        if result not in (0, 1):
+            continue
+        if pd.isna(row["DATE"]):
+            continue
+        
+        fighter = row["FIGHTER"]
+        opponent = row["opp_FIGHTER"]
+        date_str = str(row["DATE"].date())
+        
+        # Create a unique key for each fight (sorted fighter names + date)
+        fight_key = tuple(sorted([fighter, opponent])) + (date_str,)
+        if fight_key in processed_fights:
+            continue
+        processed_fights.add(fight_key)
+        
+        # Skip if equal Elo ratings
+        if row["precomp_elo"] == row["opp_precomp_elo"]:
+            continue
+        
+        # Skip if either fighter has no prior history
+        if not has_prior_history(first_dates, fighter, row["DATE"]):
+            continue
+        if not has_prior_history(first_dates, opponent, row["DATE"]):
+            continue
+        
+        # Determine the higher Elo fighter
+        fighter_has_higher_elo = row["precomp_elo"] > row["opp_precomp_elo"]
+        
+        # We always bet on the higher Elo fighter
+        if fighter_has_higher_elo:
+            # FIGHTER has higher Elo - look up their odds
+            bet_on = fighter
+            bet_against = opponent
+            odds_key = (fighter, opponent, date_str)
+            # result=1 means FIGHTER won (our bet won)
+            bet_won = (result == 1)
+        else:
+            # Opponent has higher Elo - look up opponent's odds
+            bet_on = opponent
+            bet_against = fighter
+            odds_key = (opponent, fighter, date_str)
+            # result=0 means FIGHTER lost, so opponent (our bet) won
+            bet_won = (result == 0)
+        
+        # Look up odds for the fighter we're betting on
+        if odds_key not in odds_lookup:
+            continue
+        
+        bet_odds = odds_lookup[odds_key]
+        decimal_odds = american_odds_to_decimal(bet_odds)
+        if decimal_odds is None:
+            continue
+        
+        # Simulate $1 bet
+        bet_amount = 1.0
+        total_wagered += bet_amount
+        
+        if bet_won:
+            payout = bet_amount * decimal_odds
+            profit = payout - bet_amount
+        else:
+            profit = -bet_amount
+        
+        total_profit += profit
+    
+    # Calculate ROI
+    if total_wagered == 0:
+        return 0.0
+    
+    roi_percent = (total_profit / total_wagered) * 100
+    return roi_percent
+
+
+def _calculate_roi_worker(args):
+    """Module-level worker function for parallel ROI calculation (must be at module level for multiprocessing)"""
+    params_dict, train_data, odds_data, lookback_days = args
+    params = params_dict["params"]
+    
+    roi = evaluate_params_roi(train_data, odds_data, params, lookback_days=lookback_days)
+    return params_dict["index"], roi
+
+
+def ga_search_params_roi(
+    df,
+    odds_df,
+    test_df=None,
+    population_size=30,
+    generations=30,
+    lookback_days=365,
+    seed=42,
+    return_all_results=False,
+    verbose=True,
+):
+    """
+    Full GA search over k and method of victory weights using ROI as fitness.
+    
+    This function optimizes parameters to maximize ROI on recent fights:
+    1. Load all historical fight data
+    2. For each candidate parameter set:
+       - Train Elo model on ALL historical data using the candidate parameters
+       - Calculate ROI by simulating $1 bets on the higher-rated fighter for recent fights
+       - Use ROI% as the fitness metric
+    3. Evolve parameters to maximize ROI%
+    
+    Args:
+        df: All historical fight data (will be used for training Elo)
+        odds_df: Odds data with avg_odds column
+        test_df: Optional test data for OOS evaluation tracking (does not affect fitness)
+        population_size: Number of individuals in each generation
+        generations: Number of generations to evolve
+        lookback_days: Number of days to look back for ROI calculation (default 365)
+        seed: Random seed for reproducibility (None for random)
+        return_all_results: If True, returns list of all generation results
+        verbose: If True, prints progress for each generation
+    
+    Returns:
+        If return_all_results=False: best_params, best_fitness
+        If return_all_results=True: best_params, best_fitness, all_results
+    """
+    if seed is not None:
+        random.seed(seed)
+    
+    # Prepare odds data
+    odds_df = odds_df.copy()
+    odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+    
+    # Calculate cutoff date for lookback period (for display purposes)
+    max_date = df["DATE"].max()
+    lookback_cutoff = max_date - pd.Timedelta(days=lookback_days)
+    
+    if verbose:
+        print(f"Optimizing ROI for fights from {lookback_cutoff.date()} to {max_date.date()}")
+        print(f"Total historical fights: {len(df)}")
+        recent_fights = df[df["DATE"] > lookback_cutoff]
+        print(f"Fights in lookback period ({lookback_days} days): {len(recent_fights)}")
+    
+    all_results = []
+    
+    # Initialize population with diverse parameters
+    population = []
+    for i in range(population_size):
+        p = random_params()
+        fitness = evaluate_params_roi(df, odds_df, p, lookback_days=lookback_days)
+        population.append({"params": p, "fitness": fitness})
+    
+    best_ind = max(population, key=lambda ind: ind["fitness"])
+    if verbose:
+        fitnesses = [ind["fitness"] for ind in population]
+        avg_fitness = sum(fitnesses) / len(fitnesses)
+        print(
+            f"Initial population: best ROI={best_ind['fitness']:.2f}%, "
+            f"avg ROI={avg_fitness:.2f}%, "
+            f"params: k={best_ind['params']['k']:.1f}"
+        )
+    
+    # GA loop
+    for gen in range(generations):
+        new_population = []
+        
+        # Elitism - keep top individual
+        population.sort(key=lambda ind: ind["fitness"], reverse=True)
+        elite = population[0].copy()
+        new_population.append(elite)
+        
+        # Fill the rest
+        while len(new_population) < population_size:
+            parent1 = tournament_select(population)
+            parent2 = tournament_select(population)
+            child_params = crossover(parent1, parent2)
+            child_params = mutate(child_params)
+            
+            fitness = evaluate_params_roi(df, odds_df, child_params, lookback_days=lookback_days)
+            new_population.append({"params": child_params, "fitness": fitness})
+        
+        population = new_population
+        gen_best = max(population, key=lambda ind: ind["fitness"])
+        if gen_best["fitness"] > best_ind["fitness"]:
+            best_ind = gen_best
+        
+        # Calculate population statistics (needed for both verbose and return_all_results)
+        fitnesses = [ind["fitness"] for ind in population]
+        avg_fitness = sum(fitnesses) / len(fitnesses)
+        min_fitness = min(fitnesses)
+        max_fitness = max(fitnesses)
+        
+        if verbose:
+            print(
+                f"Gen {gen + 1:02d}, best ROI={gen_best['fitness']:.2f}%, "
+                f"avg={avg_fitness:.2f}%, range=[{min_fitness:.2f}%, {max_fitness:.2f}%]"
+            )
+            if gen_best["fitness"] > best_ind["fitness"]:
+                print(f"  *** NEW BEST: k={gen_best['params']['k']:.1f}, ROI={gen_best['fitness']:.2f}%")
+        
+        if return_all_results:
+            gen_summary = {
+                'generation': gen + 1,
+                'best_fitness': gen_best['fitness'],
+                'best_params': gen_best['params'].copy(),
+                'population_avg_fitness': avg_fitness,
+                'population_max_fitness': max_fitness,
+                'population_min_fitness': min_fitness,
+            }
+            all_results.append(gen_summary)
+    
+    if return_all_results:
+        return best_ind["params"], best_ind["fitness"], all_results
+    return best_ind["params"], best_ind["fitness"]
+
+
+def calculate_oos_roi(df_trained, test_df, odds_df, verbose=False):
+    """
+    Calculate out-of-sample ROI on test data using pre-trained Elo ratings.
+    
+    Args:
+        df_trained: DataFrame with Elo ratings already calculated
+        test_df: Test data (e.g., past3_events.csv) with date, fighter, opp_fighter, result
+        odds_df: Odds data with avg_odds column
+        verbose: If True, prints details for each bet
+    
+    Returns:
+        dict: ROI metrics including roi_percent, total_bets, total_profit, etc.
+    """
+    # Get all fighter names from training data for name matching
+    all_training_fighters = set()
+    for _, r in df_trained.iterrows():
+        all_training_fighters.add(r["FIGHTER"])
+        all_training_fighters.add(r["opp_FIGHTER"])
+    
+    # Get latest ratings from training data
+    ratings = latest_ratings_from_trained_df(df_trained, base_elo=1500)
+    
+    # Build bidirectional odds lookup
+    odds_lookup = build_bidirectional_odds_lookup(odds_df)
+    
+    # Process test data
+    test_df_copy = test_df.copy()
+    test_df_copy["DATE"] = pd.to_datetime(test_df_copy["date"])
+    
+    total_wagered = 0.0
+    total_profit = 0.0
+    total_bets = 0
+    wins = 0
+    processed_fights = set()
+    
+    for _, row in test_df_copy.iterrows():
+        f1_test = row["fighter"]
+        f2_test = row["opp_fighter"]
+        res = row["result"]
+        test_date = row["DATE"]
+        
+        if res not in (0, 1):
+            continue
+        
+        # Create unique fight key
+        fight_key = tuple(sorted([f1_test, f2_test])) + (str(test_date.date()),)
+        if fight_key in processed_fights:
+            continue
+        processed_fights.add(fight_key)
+        
+        # Try to match fighter names
+        f1 = find_fighter_match(f1_test, all_training_fighters) or f1_test
+        f2 = find_fighter_match(f2_test, all_training_fighters) or f2_test
+        
+        # Get ratings
+        r1 = ratings.get(f1, 1500)
+        r2 = ratings.get(f2, 1500)
+        
+        # Skip if equal ratings
+        if r1 == r2:
+            continue
+        
+        # Determine higher Elo fighter
+        date_str = str(test_date.date())
+        if r1 > r2:
+            bet_on = f1
+            bet_against = f2
+            odds_key = (f1, f2, date_str)
+            # Try reverse key too
+            alt_odds_key = (f2, f1, date_str)
+            bet_won = (res == 1)  # f1 won
+        else:
+            bet_on = f2
+            bet_against = f1
+            odds_key = (f2, f1, date_str)
+            alt_odds_key = (f1, f2, date_str)
+            bet_won = (res == 0)  # f1 lost, so f2 won
+        
+        # Look up odds
+        if odds_key in odds_lookup:
+            bet_odds = odds_lookup[odds_key]
+        elif alt_odds_key in odds_lookup:
+            bet_odds = odds_lookup[alt_odds_key]
+        else:
+            if verbose:
+                print(f"Skipping {f1_test} vs {f2_test} on {date_str}: No odds found")
+            continue
+        
+        decimal_odds = american_odds_to_decimal(bet_odds)
+        if decimal_odds is None:
+            continue
+        
+        # Simulate bet
+        bet_amount = 1.0
+        total_wagered += bet_amount
+        total_bets += 1
+        
+        if bet_won:
+            payout = bet_amount * decimal_odds
+            profit = payout - bet_amount
+            wins += 1
+        else:
+            profit = -bet_amount
+        
+        total_profit += profit
+        
+        if verbose:
+            result_str = "WIN" if bet_won else "LOSS"
+            print(f"{date_str}: {bet_on} ({r1 if bet_on == f1 else r2:.0f}) vs {bet_against} "
+                  f"-> {result_str}, odds={bet_odds:+.0f}, profit=${profit:.2f}")
+    
+    if total_wagered == 0:
+        return {
+            'roi_percent': 0.0,
+            'total_bets': 0,
+            'total_wagered': 0.0,
+            'total_profit': 0.0,
+            'wins': 0,
+            'accuracy': 0.0
+        }
+    
+    roi_percent = (total_profit / total_wagered) * 100
+    accuracy = wins / total_bets if total_bets > 0 else 0.0
+    
+    return {
+        'roi_percent': roi_percent,
+        'total_bets': total_bets,
+        'total_wagered': total_wagered,
+        'total_profit': total_profit,
+        'wins': wins,
+        'accuracy': accuracy
+    }
+
+
 def tournament_select(population, k_tour=3):
     """
     Tournament selection: pick k individuals and return the best.
@@ -704,12 +1169,25 @@ def ga_search_params(
 # =========================
 
 if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Genetic Algorithm for Elo Parameter Optimization")
+    parser.add_argument("--mode", choices=["accuracy", "roi"], default="roi",
+                        help="Optimization mode: 'accuracy' (original) or 'roi' (ROI-based)")
+    parser.add_argument("--population", type=int, default=30, help="Population size")
+    parser.add_argument("--generations", type=int, default=30, help="Number of generations")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
+    args = parser.parse_args()
+    
     df = pd.read_csv("data/interleaved_cleaned.csv", low_memory=False)
     test_df = pd.read_csv("data/past3_events.csv", low_memory=False)
+    odds_df = pd.read_csv("after_averaging.csv", low_memory=False)
 
     df["result"] = pd.to_numeric(df["result"], errors="coerce")
-    df["DATE"] = pd.to_datetime(df["DATE"])
+    df["DATE"] = pd.to_datetime(df["DATE"]).dt.tz_localize(None)
     df = df.sort_values("DATE").reset_index(drop=True)
+    
+    odds_df["DATE"] = pd.to_datetime(odds_df["DATE"]).dt.tz_localize(None)
 
     # boutcounts first, so prediction filters can use them
     df = add_bout_counts(df)
@@ -719,47 +1197,111 @@ if __name__ == "__main__":
     if "opp_precomp_boutcount" in df.columns:
         df["opp_precomp_boutcount"] = pd.to_numeric(df["opp_precomp_boutcount"], errors="coerce")
 
-    print(test_df["date"].min(), test_df["date"].max())
+    print(f"Test data date range: {test_df['date'].min()} to {test_df['date'].max()}")
 
-    # Run GA search over k and MoV weights
-    # Set seed=None for different results on each run, or use a fixed seed for reproducibility
-    best_params, best_future_acc, cutoff = ga_search_params(
-        df,
-        test_df=test_df,  # Pass test_df for OOS evaluation tracking
-        population_size=30,
-        generations=30,
-        cutoff_quantile=0.8,
-        seed=None,  # Set to None for random runs, or an integer for reproducibility
-    )
+    if args.mode == "roi":
+        print("\n" + "="*60)
+        print("ROI-BASED GENETIC ALGORITHM OPTIMIZATION")
+        print("="*60)
+        print("Optimizing parameters to maximize ROI on past year of fights")
+        
+        # Run ROI-based GA search
+        best_params, best_roi = ga_search_params_roi(
+            df,
+            odds_df,
+            test_df=test_df,
+            population_size=args.population,
+            generations=args.generations,
+            seed=args.seed,
+        )
 
-    print("\n=== GA best params ===")
-    print(best_params)
-    print(f"Best future accuracy on training window: {best_future_acc:.4f}")
+        print("\n=== GA best params (ROI-optimized) ===")
+        print(best_params)
+        print(f"Best ROI on past year: {best_roi:.2f}%")
 
-    # Train final Elo with best params on ALL DATA before test dates
-    # The cutoff was only for GA optimization (train/validation split)
-    # For OOS, we use all historical data before the test events
-    mov_params = {
-        "w_ko":   best_params["w_ko"],
-        "w_sub":  best_params["w_sub"],
-        "w_udec": best_params["w_udec"],
-        "w_sdec": best_params["w_sdec"],
-        "w_mdec": best_params["w_mdec"],
-    }
-    best_k = best_params["k"]
+        # Train final Elo with best params on ALL DATA before test dates
+        mov_params = {
+            "w_ko":   best_params["w_ko"],
+            "w_sub":  best_params["w_sub"],
+            "w_udec": best_params["w_udec"],
+            "w_sdec": best_params["w_sdec"],
+            "w_mdec": best_params["w_mdec"],
+        }
+        best_k = best_params["k"]
 
-    # Use ALL data before the test dates for final training
-    test_start_date = pd.to_datetime(test_df["date"]).min()
-    df_train_all = df[df["DATE"] < test_start_date].copy()
-    df_trained = run_basic_elo(df_train_all, k=best_k, mov_params=mov_params)
+        # Use ALL data before the test dates for final training
+        test_start_date = pd.to_datetime(test_df["date"]).min()
+        df_train_all = df[df["DATE"] < test_start_date].copy()
+        df_trained = run_basic_elo(df_train_all, k=best_k, mov_params=mov_params)
 
-    # OOS evaluation on past 3 events
-    print("\n=== OOS evaluation on data/past3_events.csv ===")
-    oos_acc = test_out_of_sample_accuracy(
-        df_trained,
-        test_df,
-        verbose=True,
-        gap_threshold=75,
-        min_train_bouts=1,  # bump this to 2 or 3 if you want "trusted Elo only"
-    )
-    print("Overall OOS accuracy:", oos_acc)
+        # OOS ROI evaluation on past 3 events
+        print("\n=== OOS ROI evaluation on data/past3_events.csv ===")
+        oos_roi_results = calculate_oos_roi(
+            df_trained,
+            test_df,
+            odds_df,
+            verbose=True,
+        )
+        print(f"\nOOS Results:")
+        print(f"  Total Bets: {oos_roi_results['total_bets']}")
+        print(f"  Wins: {oos_roi_results['wins']}")
+        print(f"  Accuracy: {oos_roi_results['accuracy']*100:.2f}%")
+        print(f"  Total Wagered: ${oos_roi_results['total_wagered']:.2f}")
+        print(f"  Total Profit: ${oos_roi_results['total_profit']:.2f}")
+        print(f"  ROI: {oos_roi_results['roi_percent']:.2f}%")
+        
+        # Also calculate OOS accuracy for comparison
+        print("\n=== OOS Accuracy evaluation on data/past3_events.csv ===")
+        oos_acc = test_out_of_sample_accuracy(
+            df_trained,
+            test_df,
+            verbose=True,
+            gap_threshold=75,
+            min_train_bouts=1,
+        )
+        print("Overall OOS accuracy:", oos_acc)
+    else:
+        # Original accuracy-based GA
+        print("\n" + "="*60)
+        print("ACCURACY-BASED GENETIC ALGORITHM OPTIMIZATION")
+        print("="*60)
+        
+        # Run GA search over k and MoV weights
+        best_params, best_future_acc, cutoff = ga_search_params(
+            df,
+            test_df=test_df,
+            population_size=args.population,
+            generations=args.generations,
+            cutoff_quantile=0.8,
+            seed=args.seed,
+        )
+
+        print("\n=== GA best params ===")
+        print(best_params)
+        print(f"Best future accuracy on training window: {best_future_acc:.4f}")
+
+        # Train final Elo with best params on ALL DATA before test dates
+        mov_params = {
+            "w_ko":   best_params["w_ko"],
+            "w_sub":  best_params["w_sub"],
+            "w_udec": best_params["w_udec"],
+            "w_sdec": best_params["w_sdec"],
+            "w_mdec": best_params["w_mdec"],
+        }
+        best_k = best_params["k"]
+
+        # Use ALL data before the test dates for final training
+        test_start_date = pd.to_datetime(test_df["date"]).min()
+        df_train_all = df[df["DATE"] < test_start_date].copy()
+        df_trained = run_basic_elo(df_train_all, k=best_k, mov_params=mov_params)
+
+        # OOS evaluation on past 3 events
+        print("\n=== OOS evaluation on data/past3_events.csv ===")
+        oos_acc = test_out_of_sample_accuracy(
+            df_trained,
+            test_df,
+            verbose=True,
+            gap_threshold=75,
+            min_train_bouts=1,
+        )
+        print("Overall OOS accuracy:", oos_acc)
