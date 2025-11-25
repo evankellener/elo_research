@@ -201,6 +201,60 @@ class TestComputeROIPredictions(unittest.TestCase):
             # The bet should be on HigherElo (who has higher Elo)
             self.assertEqual(jan_bets.iloc[0]['bet_on'], 'HigherElo',
                 "Should bet on HigherElo who has higher Elo")
+    
+    def test_bidirectional_odds_lookup_with_odds_df(self):
+        """Test that correct odds are used when odds_df provides both perspectives.
+        
+        When odds_df is provided with both fighters' odds (e.g., favorite at -200, 
+        underdog at +180), the function should use the correct odds for the 
+        higher-Elo fighter we're betting on.
+        
+        KEY SCENARIO:
+        - Main df only has one row: FIGHTER='LowerElo', opp_FIGHTER='HigherElo'
+        - LowerElo has Elo 1400, HigherElo has Elo 1600
+        - odds_df has BOTH perspectives with correct odds for each:
+          - LowerElo: +180 (underdog)
+          - HigherElo: -200 (favorite)
+        - When betting on HigherElo, should use HigherElo's odds (-200), NOT LowerElo's (+180)
+        """
+        # Main df - only one row for the fight
+        history_df = pd.DataFrame({
+            'DATE': pd.to_datetime([
+                '2023-12-01', '2023-12-01',  # Fight 1: establishes history
+                '2023-12-15', '2023-12-15',  # Fight 2: more history
+                '2024-01-01'                  # Fight 3: ONLY ONE ROW from LowerElo's perspective
+            ]),
+            'FIGHTER': ['HigherElo', 'LowerElo', 'HigherElo', 'OtherGuy', 'LowerElo'],
+            'opp_FIGHTER': ['LowerElo', 'HigherElo', 'OtherGuy', 'HigherElo', 'HigherElo'],
+            'result': [1, 0, 1, 0, 0],  # HigherElo wins
+            'precomp_elo': [1500, 1500, 1550, 1500, 1400],
+            'opp_precomp_elo': [1500, 1500, 1500, 1550, 1600],
+            'postcomp_elo': [1550, 1450, 1600, 1450, 1350],
+            'opp_postcomp_elo': [1450, 1550, 1450, 1600, 1650],
+        })
+        
+        # odds_df has BOTH perspectives with correct odds for each fighter
+        odds_df = pd.DataFrame({
+            'DATE': pd.to_datetime(['2024-01-01', '2024-01-01']),
+            'FIGHTER': ['LowerElo', 'HigherElo'],
+            'opp_FIGHTER': ['HigherElo', 'LowerElo'],
+            'avg_odds': [180, -200]  # LowerElo at +180, HigherElo at -200
+        })
+        
+        result = compute_roi_predictions(history_df, odds_df=odds_df)
+        
+        # Should have a bet
+        self.assertGreater(result['total_bets'], 0)
+        
+        # The bet should use HigherElo's odds (-200), not LowerElo's (+180)
+        records = result['records']
+        jan_bets = records[records['date'].dt.date == pd.to_datetime('2024-01-01').date()]
+        self.assertEqual(len(jan_bets), 1)
+        self.assertEqual(jan_bets.iloc[0]['bet_on'], 'HigherElo')
+        # HigherElo is favorite at -200, decimal odds = 1.5
+        self.assertEqual(jan_bets.iloc[0]['avg_odds'], -200,
+            "Should use HigherElo's odds (-200), not LowerElo's (+180)")
+        self.assertAlmostEqual(jan_bets.iloc[0]['decimal_odds'], 1.5, places=2)
 
 
 class TestComputeROIOverTime(unittest.TestCase):

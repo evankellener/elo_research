@@ -209,6 +209,7 @@ def compute_roi_predictions(df, odds_df=None):
         dict: Dictionary containing ROI%, log loss, brier score, and detailed records
     """
     # If odds_df is provided, merge odds into df
+    odds_lookup = {}  # Will be used for efficient lookup when betting on opponent
     if odds_df is not None:
         # Create a copy to avoid modifying original
         df = df.copy()
@@ -220,7 +221,7 @@ def compute_roi_predictions(df, odds_df=None):
         df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
         
         # Create a lookup dictionary for odds: (fighter, opponent, date) -> avg_odds
-        odds_lookup = {}
+        # This contains both perspectives from odds_df (both fighters' odds)
         for _, row in odds_df.iterrows():
             if pd.notna(row.get('avg_odds')):
                 key = (row['FIGHTER'], row['opp_FIGHTER'], str(row['DATE']))
@@ -243,16 +244,22 @@ def compute_roi_predictions(df, odds_df=None):
     processed_fights = set()  # Track unique fights to avoid double counting
     
     # Build odds lookup for efficient access when betting on opponent
-    # Store both directions so lookup works regardless of which fighter has higher Elo
-    odds_by_fight = {}
-    for _, row in df.iterrows():
-        if pd.notna(row.get('avg_odds')):
-            key = (row['FIGHTER'], row['opp_FIGHTER'], str(row['DATE']))
-            odds_by_fight[key] = row['avg_odds']
-            # Also store reverse key so lookup works when opponent has higher Elo
-            reverse_key = (row['opp_FIGHTER'], row['FIGHTER'], str(row['DATE']))
-            if reverse_key not in odds_by_fight:
-                odds_by_fight[reverse_key] = row['avg_odds']
+    # Use odds_lookup if it was built from odds_df (contains both perspectives),
+    # otherwise build from df with bidirectional storage
+    if odds_lookup:
+        # odds_lookup from odds_df already has both perspectives (both fighters' correct odds)
+        odds_by_fight = odds_lookup
+    else:
+        # Build from df - store both directions so lookup works regardless of which fighter has higher Elo
+        odds_by_fight = {}
+        for _, row in df.iterrows():
+            if pd.notna(row.get('avg_odds')):
+                key = (row['FIGHTER'], row['opp_FIGHTER'], str(row['DATE']))
+                odds_by_fight[key] = row['avg_odds']
+                # Also store reverse key so lookup works when opponent has higher Elo
+                reverse_key = (row['opp_FIGHTER'], row['FIGHTER'], str(row['DATE']))
+                if reverse_key not in odds_by_fight:
+                    odds_by_fight[reverse_key] = row['avg_odds']
     
     for _, row in df.iterrows():
         # Skip invalid results
