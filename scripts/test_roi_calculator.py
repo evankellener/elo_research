@@ -447,6 +447,80 @@ class TestAnalyzeRandomEvents(unittest.TestCase):
             for fight in event.get('other_fights', []):
                 for key in required_fight_keys:
                     self.assertIn(key, fight)
+    
+    def test_bidirectional_odds_lookup(self):
+        """Test that odds lookup works regardless of fighter order.
+        
+        This tests the fix for the issue where odds would not be found if
+        the fighters appeared in reverse order in the odds_df vs the fight data.
+        For example: Odds exist as (Bogdan Guskov, Zac Pauga, 2024-02-10)
+        but lookup was (Zac Pauga, Bogdan Guskov, 2024-02-10) - should still work.
+        """
+        # Create ROI records with specific fighter ordering
+        records_df = pd.DataFrame({
+            'date': pd.to_datetime(['2024-02-10']),
+            'bet_on': ['Zac Pauga'],  # Note: Zac Pauga is bet_on
+            'bet_against': ['Bogdan Guskov'],
+            'bet_won': [1],
+            'elo_diff': [50],
+            'expected_prob': [0.57],
+            'avg_odds': [102],
+            'decimal_odds': [2.02],
+            'bet_amount': [1.0],
+            'payout': [2.02],
+            'profit': [1.02]
+        })
+        
+        roi_results = {'records': records_df}
+        
+        # Create df with same ordering as records
+        df = pd.DataFrame({
+            'DATE': pd.to_datetime(['2024-02-10', '2024-02-10']),
+            'FIGHTER': ['Zac Pauga', 'Bogdan Guskov'],
+            'opp_FIGHTER': ['Bogdan Guskov', 'Zac Pauga'],
+            'precomp_elo': [1550, 1500],
+            'postcomp_elo': [1570, 1480],
+            'opp_precomp_elo': [1500, 1550],
+            'opp_postcomp_elo': [1480, 1570],
+            'result': [1, 0],
+            'EVENT': ['UFC Fight Night'] * 2,
+            'ko': [0] * 2,
+            'subw': [0] * 2,
+            'udec': [1] * 2,
+            'sdec': [0] * 2,
+            'mdec': [0] * 2,
+            'round': [3] * 2,
+            'time_format': ['3 Rnd (5-5-5)'] * 2
+        })
+        
+        # Create odds_df with REVERSE ordering (Bogdan Guskov as FIGHTER)
+        # This is the key to the test - odds stored in reverse order
+        odds_df = pd.DataFrame({
+            'DATE': pd.to_datetime(['2024-02-10', '2024-02-10']),
+            'FIGHTER': ['Bogdan Guskov', 'Zac Pauga'],  # Reversed from the bet
+            'opp_FIGHTER': ['Zac Pauga', 'Bogdan Guskov'],
+            'EVENT': ['UFC Fight Night'] * 2,
+            'avg_odds': [-110, 102],  # Bogdan's odds listed first
+            'draftkings_odds': [-115, 105],
+            'fanduel_odds': [-105, 100],
+            'betmgm_odds': [-108, 102]
+        })
+        
+        result = analyze_random_events(df, roi_results, odds_df=odds_df, n_events=1, random_seed=42)
+        
+        # Should find the event
+        self.assertEqual(len(result), 1)
+        
+        # Should have the bet with odds data even though fighter order was reversed
+        event = result[0]
+        self.assertEqual(len(event['bets']), 1)
+        
+        bet = event['bets'][0]
+        # Verify odds data was found (not None or missing)
+        # The key assertion: odds should be found even with reversed fighter order
+        self.assertIsNotNone(bet.get('draftkings_odds'))
+        self.assertIsNotNone(bet.get('fanduel_odds'))
+        self.assertIsNotNone(bet.get('betmgm_odds'))
 
 
 class TestDisplayDetailedEventAnalysis(unittest.TestCase):
