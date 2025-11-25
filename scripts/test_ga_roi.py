@@ -328,60 +328,37 @@ class TestDrawHandling(unittest.TestCase):
 class TestMainBlockModeRouting(unittest.TestCase):
     """Tests for the main block mode routing to ensure --mode flag works correctly"""
     
+    def setUp(self):
+        """Set up the argparse parser for mode routing tests"""
+        import argparse
+        self.parser = argparse.ArgumentParser(description="Genetic Algorithm for Elo Parameter Optimization")
+        self.parser.add_argument("--mode", choices=["accuracy", "roi"], default="roi",
+                                 help="Optimization mode: 'accuracy' (original) or 'roi' (ROI-based)")
+    
     def test_argparse_mode_default_is_roi(self):
         """Test that the default mode is 'roi'"""
-        import argparse
-        
-        parser = argparse.ArgumentParser(description="Genetic Algorithm for Elo Parameter Optimization")
-        parser.add_argument("--mode", choices=["accuracy", "roi"], default="roi",
-                            help="Optimization mode: 'accuracy' (original) or 'roi' (ROI-based)")
-        
-        args = parser.parse_args([])
+        args = self.parser.parse_args([])
         self.assertEqual(args.mode, "roi", "Default mode should be 'roi'")
     
     def test_argparse_mode_roi_explicit(self):
         """Test that --mode roi is correctly parsed"""
-        import argparse
-        
-        parser = argparse.ArgumentParser(description="Genetic Algorithm for Elo Parameter Optimization")
-        parser.add_argument("--mode", choices=["accuracy", "roi"], default="roi",
-                            help="Optimization mode: 'accuracy' (original) or 'roi' (ROI-based)")
-        
-        args = parser.parse_args(["--mode", "roi"])
+        args = self.parser.parse_args(["--mode", "roi"])
         self.assertEqual(args.mode, "roi")
     
     def test_argparse_mode_accuracy_explicit(self):
         """Test that --mode accuracy is correctly parsed"""
-        import argparse
-        
-        parser = argparse.ArgumentParser(description="Genetic Algorithm for Elo Parameter Optimization")
-        parser.add_argument("--mode", choices=["accuracy", "roi"], default="roi",
-                            help="Optimization mode: 'accuracy' (original) or 'roi' (ROI-based)")
-        
-        args = parser.parse_args(["--mode", "accuracy"])
+        args = self.parser.parse_args(["--mode", "accuracy"])
         self.assertEqual(args.mode, "accuracy")
     
     def test_mode_condition_works_for_roi(self):
-        """Test that the mode condition 'args.mode == roi' works correctly for roi mode"""
-        import argparse
-        
-        parser = argparse.ArgumentParser(description="Genetic Algorithm for Elo Parameter Optimization")
-        parser.add_argument("--mode", choices=["accuracy", "roi"], default="roi",
-                            help="Optimization mode: 'accuracy' (original) or 'roi' (ROI-based)")
-        
-        args = parser.parse_args(["--mode", "roi"])
-        self.assertTrue(args.mode == "roi", "Condition 'args.mode == roi' should be True for roi mode")
+        """Test that the mode condition 'args.mode == \"roi\"' works correctly for roi mode"""
+        args = self.parser.parse_args(["--mode", "roi"])
+        self.assertTrue(args.mode == "roi", "Condition 'args.mode == \"roi\"' should be True for roi mode")
     
     def test_mode_condition_works_for_accuracy(self):
-        """Test that the mode condition 'args.mode == roi' correctly fails for accuracy mode"""
-        import argparse
-        
-        parser = argparse.ArgumentParser(description="Genetic Algorithm for Elo Parameter Optimization")
-        parser.add_argument("--mode", choices=["accuracy", "roi"], default="roi",
-                            help="Optimization mode: 'accuracy' (original) or 'roi' (ROI-based)")
-        
-        args = parser.parse_args(["--mode", "accuracy"])
-        self.assertFalse(args.mode == "roi", "Condition 'args.mode == roi' should be False for accuracy mode")
+        """Test that the mode condition 'args.mode == \"roi\"' correctly fails for accuracy mode"""
+        args = self.parser.parse_args(["--mode", "accuracy"])
+        self.assertFalse(args.mode == "roi", "Condition 'args.mode == \"roi\"' should be False for accuracy mode")
 
 
 if __name__ == '__main__':
