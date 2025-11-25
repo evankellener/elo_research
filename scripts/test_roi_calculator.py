@@ -14,7 +14,10 @@ from main import (
     american_odds_to_decimal,
     compute_roi_predictions,
     compute_roi_over_time,
-    compare_odds_sources
+    compare_odds_sources,
+    analyze_random_events,
+    display_detailed_event_analysis,
+    get_method_of_victory
 )
 
 
@@ -285,6 +288,193 @@ class TestIntegration(unittest.TestCase):
         self.assertIsNotNone(comparison['avg_odds']['accuracy'])
         self.assertIsNotNone(comparison['avg_odds']['log_loss'])
         self.assertIsNotNone(comparison['avg_odds']['brier_score'])
+
+
+class TestGetMethodOfVictory(unittest.TestCase):
+    """Tests for get_method_of_victory function"""
+    
+    def test_ko_victory(self):
+        """Test detection of KO/TKO victory"""
+        row = {'ko': 1, 'subw': 0, 'udec': 0, 'sdec': 0, 'mdec': 0}
+        self.assertEqual(get_method_of_victory(row), 'KO/TKO')
+    
+    def test_submission_victory(self):
+        """Test detection of submission victory"""
+        row = {'ko': 0, 'subw': 1, 'udec': 0, 'sdec': 0, 'mdec': 0}
+        self.assertEqual(get_method_of_victory(row), 'Submission')
+    
+    def test_unanimous_decision(self):
+        """Test detection of unanimous decision"""
+        row = {'ko': 0, 'subw': 0, 'udec': 1, 'sdec': 0, 'mdec': 0}
+        self.assertEqual(get_method_of_victory(row), 'Unanimous Decision')
+    
+    def test_split_decision(self):
+        """Test detection of split decision"""
+        row = {'ko': 0, 'subw': 0, 'udec': 0, 'sdec': 1, 'mdec': 0}
+        self.assertEqual(get_method_of_victory(row), 'Split Decision')
+    
+    def test_majority_decision(self):
+        """Test detection of majority decision"""
+        row = {'ko': 0, 'subw': 0, 'udec': 0, 'sdec': 0, 'mdec': 1}
+        self.assertEqual(get_method_of_victory(row), 'Majority Decision')
+    
+    def test_unknown_victory(self):
+        """Test unknown method of victory when no flags are set"""
+        row = {'ko': 0, 'subw': 0, 'udec': 0, 'sdec': 0, 'mdec': 0}
+        self.assertEqual(get_method_of_victory(row), 'Unknown')
+
+
+class TestAnalyzeRandomEvents(unittest.TestCase):
+    """Tests for analyze_random_events function"""
+    
+    def setUp(self):
+        """Set up test data with ROI records"""
+        # Create mock ROI results with records DataFrame
+        self.records_df = pd.DataFrame({
+            'date': pd.to_datetime(['2024-01-01', '2024-01-01', '2024-01-02', '2024-01-02', '2024-01-03']),
+            'bet_on': ['Fighter A', 'Fighter C', 'Fighter E', 'Fighter G', 'Fighter I'],
+            'bet_against': ['Fighter B', 'Fighter D', 'Fighter F', 'Fighter H', 'Fighter J'],
+            'bet_won': [1, 0, 1, 1, 0],
+            'elo_diff': [100, 50, 150, 80, 120],
+            'expected_prob': [0.6, 0.55, 0.7, 0.58, 0.65],
+            'avg_odds': [-200, -150, -300, -180, -250],
+            'decimal_odds': [1.5, 1.67, 1.33, 1.56, 1.4],
+            'bet_amount': [1.0, 1.0, 1.0, 1.0, 1.0],
+            'payout': [1.5, 0, 1.33, 1.56, 0],
+            'profit': [0.5, -1.0, 0.33, 0.56, -1.0]
+        })
+        
+        self.roi_results = {'records': self.records_df}
+        
+        # Create mock df with Elo data
+        self.df = pd.DataFrame({
+            'DATE': pd.to_datetime(['2024-01-01', '2024-01-01', '2024-01-01', '2024-01-01', 
+                                   '2024-01-02', '2024-01-02', '2024-01-02', '2024-01-02',
+                                   '2024-01-03', '2024-01-03']),
+            'FIGHTER': ['Fighter A', 'Fighter B', 'Fighter C', 'Fighter D',
+                       'Fighter E', 'Fighter F', 'Fighter G', 'Fighter H',
+                       'Fighter I', 'Fighter J'],
+            'opp_FIGHTER': ['Fighter B', 'Fighter A', 'Fighter D', 'Fighter C',
+                           'Fighter F', 'Fighter E', 'Fighter H', 'Fighter G',
+                           'Fighter J', 'Fighter I'],
+            'precomp_elo': [1600, 1400, 1550, 1450, 1700, 1500, 1580, 1420, 1650, 1480],
+            'postcomp_elo': [1620, 1380, 1530, 1470, 1720, 1480, 1600, 1400, 1630, 1500],
+            'opp_precomp_elo': [1400, 1600, 1450, 1550, 1500, 1700, 1420, 1580, 1480, 1650],
+            'opp_postcomp_elo': [1380, 1620, 1470, 1530, 1480, 1720, 1400, 1600, 1500, 1630],
+            'result': [1, 0, 0, 1, 1, 0, 1, 0, 0, 1],
+            'EVENT': ['Event 1'] * 4 + ['Event 2'] * 4 + ['Event 3'] * 2,
+            'ko': [0] * 10,
+            'subw': [0] * 10,
+            'udec': [1] * 10,
+            'sdec': [0] * 10,
+            'mdec': [0] * 10,
+            'round': [3] * 10,
+            'time_format': ['3 Rnd (5-5-5)'] * 10
+        })
+    
+    def test_returns_list_of_events(self):
+        """Test that function returns a list"""
+        result = analyze_random_events(self.df, self.roi_results, n_events=2, random_seed=42)
+        self.assertIsInstance(result, list)
+    
+    def test_returns_correct_number_of_events(self):
+        """Test that function returns correct number of events"""
+        result = analyze_random_events(self.df, self.roi_results, n_events=2, random_seed=42)
+        self.assertEqual(len(result), 2)
+    
+    def test_event_has_required_keys(self):
+        """Test that each event has all required keys"""
+        result = analyze_random_events(self.df, self.roi_results, n_events=1, random_seed=42)
+        
+        required_keys = ['event_date', 'event_name', 'bets', 'event_roi', 
+                        'win_count', 'loss_count', 'total_wagered', 'total_payout', 'total_profit']
+        
+        if result:
+            for key in required_keys:
+                self.assertIn(key, result[0])
+    
+    def test_bets_have_required_keys(self):
+        """Test that each bet has required keys"""
+        result = analyze_random_events(self.df, self.roi_results, n_events=1, random_seed=42)
+        
+        required_bet_keys = ['bet_on', 'bet_against', 'bet_amount', 'payout', 
+                            'profit', 'bet_won', 'elo_diff']
+        
+        if result and result[0]['bets']:
+            for key in required_bet_keys:
+                self.assertIn(key, result[0]['bets'][0])
+    
+    def test_empty_records_returns_empty_list(self):
+        """Test that empty records returns empty list"""
+        empty_results = {'records': pd.DataFrame()}
+        result = analyze_random_events(self.df, empty_results, n_events=5)
+        self.assertEqual(result, [])
+    
+    def test_reproducibility_with_seed(self):
+        """Test that same seed produces same results"""
+        result1 = analyze_random_events(self.df, self.roi_results, n_events=2, random_seed=42)
+        result2 = analyze_random_events(self.df, self.roi_results, n_events=2, random_seed=42)
+        
+        if result1 and result2:
+            self.assertEqual(result1[0]['event_date'], result2[0]['event_date'])
+    
+    def test_event_roi_calculation(self):
+        """Test that event ROI is calculated correctly"""
+        result = analyze_random_events(self.df, self.roi_results, n_events=3, random_seed=42)
+        
+        for event in result:
+            # Verify ROI calculation: (profit / wagered) * 100
+            expected_roi = (event['total_profit'] / event['total_wagered']) * 100 if event['total_wagered'] > 0 else 0
+            self.assertAlmostEqual(event['event_roi'], expected_roi, places=2)
+
+
+class TestDisplayDetailedEventAnalysis(unittest.TestCase):
+    """Tests for display_detailed_event_analysis function"""
+    
+    def test_handles_empty_list(self):
+        """Test that function handles empty list without error"""
+        # Should not raise an exception
+        display_detailed_event_analysis([])
+    
+    def test_handles_single_event(self):
+        """Test that function handles single event"""
+        event = {
+            'event_date': '2024-01-01',
+            'event_name': 'Test Event',
+            'bets': [
+                {
+                    'bet_on': 'Fighter A',
+                    'bet_against': 'Fighter B',
+                    'bet_on_pre_elo': 1600,
+                    'bet_on_post_elo': 1620,
+                    'bet_on_elo_change': 20,
+                    'bet_against_pre_elo': 1500,
+                    'bet_against_post_elo': 1480,
+                    'bet_against_elo_change': -20,
+                    'elo_diff': 100,
+                    'avg_odds_american': -200,
+                    'decimal_odds': 1.5,
+                    'bet_amount': 1.0,
+                    'payout': 1.5,
+                    'profit': 0.5,
+                    'bet_won': True,
+                    'expected_prob': 0.6,
+                    'method_of_victory': 'KO/TKO',
+                    'round': 2,
+                    'draftkings_odds': -190,
+                    'fanduel_odds': -210,
+                    'betmgm_odds': -195
+                }
+            ],
+            'event_roi': 50.0,
+            'win_count': 1,
+            'loss_count': 0,
+            'total_wagered': 1.0,
+            'total_payout': 1.5,
+            'total_profit': 0.5
+        }
+        # Should not raise an exception
+        display_detailed_event_analysis([event])
 
 
 if __name__ == '__main__':
