@@ -1,5 +1,7 @@
 import random
+import math
 import pandas as pd
+import numpy as np
 import unicodedata
 from multiprocessing import Pool, cpu_count
 from functools import partial
@@ -492,24 +494,213 @@ def build_bidirectional_odds_lookup(odds_df):
     return odds_lookup
 
 
-def evaluate_params_roi(df, odds_df, params, lookback_days=365):
+def compute_prediction_metrics(df_with_elo, odds_df, lookback_days=0):
     """
-    Run Elo with given params and return ROI% for recent fights.
+    Compute accuracy, log loss, and Brier score for Elo predictions.
+    
+    Args:
+        df_with_elo: DataFrame with Elo ratings already calculated
+        odds_df: Odds data for ROI calculations
+        lookback_days: Number of days to look back (0 or None for all data, default 0)
+    
+    Returns:
+        dict: Contains 'accuracy', 'log_loss', 'brier_score', 'total_predictions'
+    """
+    # Filter to lookback period if requested
+    if lookback_days and lookback_days > 0:
+        max_date = df_with_elo["DATE"].max()
+        cutoff_date = max_date - pd.Timedelta(days=lookback_days)
+        test_df = df_with_elo[df_with_elo["DATE"] > cutoff_date].copy()
+    else:
+        test_df = df_with_elo.copy()
+    
+    # Build fighter history for prior fight check
+    hist = build_fighter_history(df_with_elo)
+    first_dates = hist.groupby("fighter")["date"].min().to_dict()
+    
+    predictions = []
+    actuals = []
+    processed_fights = set()
+    
+    for _, row in test_df.iterrows():
+        result = row["result"]
+        if result not in (0, 1):
+            continue
+        if pd.isna(row["DATE"]):
+            continue
+        
+        fighter = row["FIGHTER"]
+        opponent = row["opp_FIGHTER"]
+        date_str = str(row["DATE"].date())
+        
+        # Create unique fight key to avoid double counting
+        fight_key = tuple(sorted([fighter, opponent])) + (date_str,)
+        if fight_key in processed_fights:
+            continue
+        processed_fights.add(fight_key)
+        
+        # Skip if equal Elo ratings
+        if row["precomp_elo"] == row["opp_precomp_elo"]:
+            continue
+        
+        # Skip if either fighter has no prior history
+        if not has_prior_history(first_dates, fighter, row["DATE"]):
+            continue
+        if not has_prior_history(first_dates, opponent, row["DATE"]):
+            continue
+        
+        # Calculate predicted probability using Elo formula
+        elo_diff = row["precomp_elo"] - row["opp_precomp_elo"]
+        pred_prob = 1.0 / (1.0 + 10.0 ** (-elo_diff / 400.0))
+        
+        # Actual outcome (1 if fighter won, 0 if opponent won)
+        actual = int(result)
+        
+        predictions.append(pred_prob)
+        actuals.append(actual)
+    
+    if len(predictions) == 0:
+        return {
+            'accuracy': None,
+            'log_loss': None,
+            'brier_score': None,
+            'total_predictions': 0
+        }
+    
+    predictions = np.array(predictions)
+    actuals = np.array(actuals)
+    
+    # Accuracy: % of correct predictions (predict winner based on higher prob)
+    pred_winners = (predictions > 0.5).astype(int)
+    accuracy = np.mean(pred_winners == actuals)
+    
+    # Log loss: -mean(y*log(p) + (1-y)*log(1-p))
+    # Clip predictions to avoid log(0)
+    eps = 1e-15
+    predictions_clipped = np.clip(predictions, eps, 1 - eps)
+    log_loss = -np.mean(
+        actuals * np.log(predictions_clipped) + 
+        (1 - actuals) * np.log(1 - predictions_clipped)
+    )
+    
+    # Brier score: mean((p - y)^2)
+    brier_score = np.mean((predictions - actuals) ** 2)
+    
+    return {
+        'accuracy': accuracy,
+        'log_loss': log_loss,
+        'brier_score': brier_score,
+        'total_predictions': len(predictions)
+    }
+
+
+def compute_extended_roi_metrics(bet_records):
+    """
+    Compute extended ROI metrics from a list of bet records.
+    
+    Args:
+        bet_records: List of dicts with keys: date, profit, bet_amount, bet_won
+    
+    Returns:
+        dict: Contains 'trend', 'sharpe_ratio', 'min_roi', 'max_roi', 'win_rate', 
+              'num_bets', 'total_wagered', 'total_profit'
+    """
+    if not bet_records:
+        return {
+            'trend': None,
+            'sharpe_ratio': None,
+            'min_roi': None,
+            'max_roi': None,
+            'win_rate': None,
+            'num_bets': 0,
+            'total_wagered': 0.0,
+            'total_profit': 0.0
+        }
+    
+    # Convert to DataFrame for easier processing
+    df = pd.DataFrame(bet_records)
+    
+    num_bets = len(df)
+    total_wagered = df['bet_amount'].sum()
+    total_profit = df['profit'].sum()
+    
+    # Win rate
+    wins = df['bet_won'].sum()
+    win_rate = wins / num_bets if num_bets > 0 else 0.0
+    
+    # Group by date to calculate per-period metrics
+    daily_df = df.groupby('date').agg({
+        'profit': 'sum',
+        'bet_amount': 'sum'
+    }).reset_index()
+    daily_df['roi'] = (daily_df['profit'] / daily_df['bet_amount']) * 100
+    
+    # Calculate cumulative ROI
+    daily_df['cumulative_profit'] = daily_df['profit'].cumsum()
+    daily_df['cumulative_wagered'] = daily_df['bet_amount'].cumsum()
+    daily_df['cumulative_roi'] = (daily_df['cumulative_profit'] / daily_df['cumulative_wagered']) * 100
+    
+    # Trend: linear regression slope of cumulative ROI over time
+    trend = None
+    if len(daily_df) >= 2:
+        x = np.arange(len(daily_df))
+        y = daily_df['cumulative_roi'].values
+        # Simple linear regression: slope = cov(x,y) / var(x)
+        x_mean = x.mean()
+        y_mean = y.mean()
+        numerator = np.sum((x - x_mean) * (y - y_mean))
+        denominator = np.sum((x - x_mean) ** 2)
+        if denominator > 0:
+            trend = numerator / denominator  # %/day (or %/period)
+    
+    # Sharpe Ratio: (mean return / std return) * sqrt(252) for annualized
+    # Using daily ROI as returns
+    sharpe_ratio = None
+    if len(daily_df) >= 2:
+        returns = daily_df['roi'].values
+        mean_return = np.mean(returns)
+        std_return = np.std(returns, ddof=1)
+        if std_return > 0:
+            # Annualized Sharpe (assuming ~52 betting periods/year for weekly events)
+            sharpe_ratio = (mean_return / std_return) * math.sqrt(52)
+    
+    # Min and Max ROI per period
+    min_roi = daily_df['roi'].min() if len(daily_df) > 0 else None
+    max_roi = daily_df['roi'].max() if len(daily_df) > 0 else None
+    
+    return {
+        'trend': trend,
+        'sharpe_ratio': sharpe_ratio,
+        'min_roi': min_roi,
+        'max_roi': max_roi,
+        'win_rate': win_rate,
+        'num_bets': num_bets,
+        'total_wagered': total_wagered,
+        'total_profit': total_profit
+    }
+
+
+def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=False):
+    """
+    Run Elo with given params and return ROI% for fights with available odds.
     
     This function:
     1. Trains Elo model on ALL historical data using the candidate parameters
-    2. Calculates ROI by simulating $1 bets on the higher-rated fighter for recent fights
+    2. Calculates ROI by simulating $1 bets on the higher-rated fighter for fights with odds
     3. Returns ROI% as the fitness metric
     
     Args:
         df: Training data (all historical fight data with DATE, FIGHTER, opp_FIGHTER, result)
         odds_df: Odds data with DATE, FIGHTER, opp_FIGHTER, avg_odds columns
         params: Dict with k, w_ko, w_sub, w_udec, w_sdec, w_mdec
-        lookback_days: Number of days to look back for ROI calculation (default 365)
-                       Set to 0 or None to use all data
+        lookback_days: Number of days to look back for ROI calculation (default 0 = all data)
+                       Set to 0 or None to use all fights with available odds
+        return_extended: If True, return dict with extended metrics instead of just ROI
     
     Returns:
-        float: ROI percentage (0 if no valid bets)
+        If return_extended=False: float: ROI percentage (0 if no valid bets)
+        If return_extended=True: dict with roi_percent, trend, sharpe_ratio, min_roi, max_roi,
+                                 win_rate, num_bets, accuracy, log_loss, brier_score, df_with_elo
     """
     mov_params = {
         "w_ko":   params["w_ko"],
@@ -523,12 +714,13 @@ def evaluate_params_roi(df, odds_df, params, lookback_days=365):
     # Train Elo on ALL historical data
     df_with_elo = run_basic_elo(df.copy(), k=k, mov_params=mov_params)
     
-    # Filter to recent fights if requested
+    # Filter to recent fights if lookback_days is specified (>0)
     if lookback_days and lookback_days > 0:
         max_date = df_with_elo["DATE"].max()
         cutoff_date = max_date - pd.Timedelta(days=lookback_days)
         test_df = df_with_elo[df_with_elo["DATE"] > cutoff_date].copy()
     else:
+        # Use all fights (will filter to those with odds available during ROI calculation)
         test_df = df_with_elo.copy()
     
     # Build bidirectional odds lookup
@@ -538,10 +730,11 @@ def evaluate_params_roi(df, odds_df, params, lookback_days=365):
     hist = build_fighter_history(df_with_elo)
     first_dates = hist.groupby("fighter")["date"].min().to_dict()
     
-    # Calculate ROI
+    # Calculate ROI - track bet records for extended metrics
     total_wagered = 0.0
     total_profit = 0.0
     processed_fights = set()  # Track unique fights to avoid double counting
+    bet_records = []  # Track individual bets for extended metrics
     
     for _, row in test_df.iterrows():
         # Skip invalid results
@@ -610,13 +803,55 @@ def evaluate_params_roi(df, odds_df, params, lookback_days=365):
             profit = -bet_amount
         
         total_profit += profit
+        
+        # Track bet record for extended metrics
+        bet_records.append({
+            'date': row["DATE"],
+            'profit': profit,
+            'bet_amount': bet_amount,
+            'bet_won': int(bet_won)
+        })
     
     # Calculate ROI
     if total_wagered == 0:
+        if return_extended:
+            return {
+                'roi_percent': 0.0,
+                'trend': None,
+                'sharpe_ratio': None,
+                'min_roi': None,
+                'max_roi': None,
+                'win_rate': None,
+                'num_bets': 0,
+                'accuracy': None,
+                'log_loss': None,
+                'brier_score': None,
+                'df_with_elo': df_with_elo
+            }
         return 0.0
     
     roi_percent = (total_profit / total_wagered) * 100
-    return roi_percent
+    
+    if not return_extended:
+        return roi_percent
+    
+    # Compute extended metrics
+    extended = compute_extended_roi_metrics(bet_records)
+    prediction_metrics = compute_prediction_metrics(df_with_elo, odds_df, lookback_days)
+    
+    return {
+        'roi_percent': roi_percent,
+        'trend': extended['trend'],
+        'sharpe_ratio': extended['sharpe_ratio'],
+        'min_roi': extended['min_roi'],
+        'max_roi': extended['max_roi'],
+        'win_rate': extended['win_rate'],
+        'num_bets': extended['num_bets'],
+        'accuracy': prediction_metrics['accuracy'],
+        'log_loss': prediction_metrics['log_loss'],
+        'brier_score': prediction_metrics['brier_score'],
+        'df_with_elo': df_with_elo
+    }
 
 
 def _calculate_roi_worker(args):
@@ -634,32 +869,36 @@ def ga_search_params_roi(
     test_df=None,
     population_size=30,
     generations=30,
-    lookback_days=365,
+    lookback_days=0,
     seed=42,
     return_all_results=False,
     verbose=True,
+    fitness_weights=None,
 ):
     """
     Full GA search over k and method of victory weights using ROI as fitness.
     
-    This function optimizes parameters to maximize ROI on recent fights:
+    This function optimizes parameters to maximize ROI on fights with available odds:
     1. Load all historical fight data
     2. For each candidate parameter set:
        - Train Elo model on ALL historical data using the candidate parameters
-       - Calculate ROI by simulating $1 bets on the higher-rated fighter for recent fights
-       - Use ROI% as the fitness metric
-    3. Evolve parameters to maximize ROI%
+       - Calculate ROI by simulating $1 bets on the higher-rated fighter for fights with odds
+       - Use ROI% as the fitness metric (or weighted combination with trend/sharpe)
+    3. Evolve parameters to maximize fitness
     
     Args:
         df: All historical fight data (will be used for training Elo)
-        odds_df: Odds data with avg_odds column
+        odds_df: Odds data with avg_odds column (ROI calculated on all fights with odds)
         test_df: Optional test data for OOS evaluation tracking (does not affect fitness)
         population_size: Number of individuals in each generation
         generations: Number of generations to evolve
-        lookback_days: Number of days to look back for ROI calculation (default 365)
+        lookback_days: Number of days to look back for ROI calculation (default 0 = all data with odds)
         seed: Random seed for reproducibility (None for random)
         return_all_results: If True, returns list of all generation results
         verbose: If True, prints progress for each generation
+        fitness_weights: Optional dict with weights for multi-objective fitness:
+                        {'roi': 0.6, 'trend': 0.3, 'sharpe': 0.1}
+                        If None, uses ROI only. Values are normalized internally.
     
     Returns:
         If return_all_results=False: best_params, best_fitness
@@ -672,33 +911,78 @@ def ga_search_params_roi(
     odds_df = odds_df.copy()
     odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
     
-    # Calculate cutoff date for lookback period (for display purposes)
-    max_date = df["DATE"].max()
-    lookback_cutoff = max_date - pd.Timedelta(days=lookback_days)
+    # Calculate date range for odds data
+    odds_min_date = odds_df["DATE"].min()
+    odds_max_date = odds_df["DATE"].max()
+    
+    # Count unique fights with odds
+    odds_fights = odds_df[['DATE', 'FIGHTER', 'opp_FIGHTER']].drop_duplicates()
+    num_odds_fights = len(odds_fights) // 2  # Each fight appears twice (once per fighter)
     
     if verbose:
-        print(f"Optimizing ROI for fights from {lookback_cutoff.date()} to {max_date.date()}")
+        if lookback_days and lookback_days > 0:
+            max_date = df["DATE"].max()
+            lookback_cutoff = max_date - pd.Timedelta(days=lookback_days)
+            print(f"Optimizing ROI for fights from {lookback_cutoff.date()} to {max_date.date()}")
+            recent_fights = df[df["DATE"] > lookback_cutoff]
+            print(f"Fights in lookback period ({lookback_days} days): {len(recent_fights)}")
+        else:
+            print(f"Optimizing ROI on ALL fights with available odds")
+            print(f"Odds data date range: {odds_min_date.date()} to {odds_max_date.date()}")
+            print(f"Approximate fights with odds: {num_odds_fights}")
         print(f"Total historical fights: {len(df)}")
-        recent_fights = df[df["DATE"] > lookback_cutoff]
-        print(f"Fights in lookback period ({lookback_days} days): {len(recent_fights)}")
+        if fitness_weights:
+            print(f"Multi-objective fitness weights: {fitness_weights}")
     
     all_results = []
+    
+    def compute_fitness(extended_metrics):
+        """Compute fitness from extended metrics, optionally using multi-objective weights."""
+        roi = extended_metrics['roi_percent']
+        
+        if not fitness_weights:
+            return roi
+        
+        # Normalize weights
+        total_weight = sum(fitness_weights.values())
+        w_roi = fitness_weights.get('roi', 0.6) / total_weight
+        w_trend = fitness_weights.get('trend', 0.3) / total_weight
+        w_sharpe = fitness_weights.get('sharpe', 0.1) / total_weight
+        
+        # Get metrics (use 0 if None)
+        trend = extended_metrics.get('trend') or 0
+        sharpe = extended_metrics.get('sharpe_ratio') or 0
+        
+        # Weighted combination (scale trend to similar magnitude as ROI)
+        # Trend is typically small (e.g., 0.1%/day), multiply by 10 to make it comparable
+        fitness = (roi * w_roi) + (trend * 10 * w_trend) + (sharpe * w_sharpe)
+        return fitness
+    
+    def evaluate_individual(params):
+        """Evaluate params and return fitness plus extended metrics."""
+        extended = evaluate_params_roi(df, odds_df, params, lookback_days=lookback_days, return_extended=True)
+        fitness = compute_fitness(extended)
+        return fitness, extended
     
     # Initialize population with diverse parameters
     population = []
     for i in range(population_size):
         p = random_params()
-        fitness = evaluate_params_roi(df, odds_df, p, lookback_days=lookback_days)
-        population.append({"params": p, "fitness": fitness})
+        fitness, extended = evaluate_individual(p)
+        population.append({"params": p, "fitness": fitness, "extended": extended})
     
     best_ind = max(population, key=lambda ind: ind["fitness"])
     if verbose:
         fitnesses = [ind["fitness"] for ind in population]
         avg_fitness = sum(fitnesses) / len(fitnesses)
+        ext = best_ind.get("extended", {})
+        trend_str = f"{ext.get('trend', 0):.2f}%/day" if ext.get('trend') is not None else "N/A"
+        sharpe_str = f"{ext.get('sharpe_ratio', 0):.2f}" if ext.get('sharpe_ratio') is not None else "N/A"
+        win_rate_str = f"{ext.get('win_rate', 0)*100:.0f}%" if ext.get('win_rate') is not None else "N/A"
+        num_bets = ext.get('num_bets', 0)
         print(
             f"Initial population: best ROI={best_ind['fitness']:.2f}%, "
-            f"avg ROI={avg_fitness:.2f}%, "
-            f"params: k={best_ind['params']['k']:.1f}"
+            f"Trend={trend_str}, Sharpe={sharpe_str}, WinRate={win_rate_str}, Bets={num_bets}"
         )
     
     # GA loop
@@ -717,13 +1001,14 @@ def ga_search_params_roi(
             child_params = crossover(parent1, parent2)
             child_params = mutate(child_params)
             
-            fitness = evaluate_params_roi(df, odds_df, child_params, lookback_days=lookback_days)
-            new_population.append({"params": child_params, "fitness": fitness})
+            fitness, extended = evaluate_individual(child_params)
+            new_population.append({"params": child_params, "fitness": fitness, "extended": extended})
         
         population = new_population
         gen_best = max(population, key=lambda ind: ind["fitness"])
-        if gen_best["fitness"] > best_ind["fitness"]:
-            best_ind = gen_best
+        is_new_best = gen_best["fitness"] > best_ind["fitness"]
+        if is_new_best:
+            best_ind = gen_best.copy()
         
         # Calculate population statistics (needed for both verbose and return_all_results)
         fitnesses = [ind["fitness"] for ind in population]
@@ -732,14 +1017,33 @@ def ga_search_params_roi(
         max_fitness = max(fitnesses)
         
         if verbose:
+            ext = gen_best.get("extended", {})
+            roi = ext.get('roi_percent', gen_best['fitness'])
+            trend_str = f"{ext.get('trend', 0):+.2f}%/day" if ext.get('trend') is not None else "N/A"
+            sharpe_str = f"{ext.get('sharpe_ratio', 0):.2f}" if ext.get('sharpe_ratio') is not None else "N/A"
+            win_rate_str = f"{ext.get('win_rate', 0)*100:.0f}%" if ext.get('win_rate') is not None else "N/A"
+            num_bets = ext.get('num_bets', 0)
+            
             print(
-                f"Gen {gen + 1:02d}, best ROI={gen_best['fitness']:.2f}%, "
-                f"avg={avg_fitness:.2f}%, range=[{min_fitness:.2f}%, {max_fitness:.2f}%]"
+                f"Gen {gen + 1:02d}, best ROI={roi:+.2f}%, Trend={trend_str}, "
+                f"Sharpe={sharpe_str}, WinRate={win_rate_str}, Bets={num_bets}, "
+                f"range=[{min_fitness:+.2f}%, {max_fitness:+.2f}%]"
             )
-            if gen_best["fitness"] > best_ind["fitness"]:
-                print(f"  *** NEW BEST: k={gen_best['params']['k']:.1f}, ROI={gen_best['fitness']:.2f}%")
+            
+            # Print accuracy, log loss, brier score for best params
+            accuracy = ext.get('accuracy')
+            log_loss = ext.get('log_loss')
+            brier_score = ext.get('brier_score')
+            if accuracy is not None:
+                print(
+                    f"  Accuracy: {accuracy*100:.1f}%, LogLoss: {log_loss:.3f}, BrierScore: {brier_score:.3f}"
+                )
+            
+            if is_new_best:
+                print(f"  *** NEW BEST: k={gen_best['params']['k']:.1f}, ROI={roi:+.2f}%")
         
         if return_all_results:
+            ext = gen_best.get("extended", {})
             gen_summary = {
                 'generation': gen + 1,
                 'best_fitness': gen_best['fitness'],
@@ -747,6 +1051,17 @@ def ga_search_params_roi(
                 'population_avg_fitness': avg_fitness,
                 'population_max_fitness': max_fitness,
                 'population_min_fitness': min_fitness,
+                # Extended metrics for best individual
+                'best_roi_percent': ext.get('roi_percent'),
+                'best_trend': ext.get('trend'),
+                'best_sharpe_ratio': ext.get('sharpe_ratio'),
+                'best_min_roi': ext.get('min_roi'),
+                'best_max_roi': ext.get('max_roi'),
+                'best_win_rate': ext.get('win_rate'),
+                'best_num_bets': ext.get('num_bets'),
+                'best_accuracy': ext.get('accuracy'),
+                'best_log_loss': ext.get('log_loss'),
+                'best_brier_score': ext.get('brier_score'),
             }
             all_results.append(gen_summary)
     
@@ -1205,10 +1520,10 @@ if __name__ == "__main__":
         print("\n" + "="*60)
         print("ROI-BASED GENETIC ALGORITHM OPTIMIZATION")
         print("="*60)
-        print("Optimizing parameters to maximize ROI on past year of fights")
+        print("Optimizing parameters to maximize ROI on ALL fights with available odds")
         print("Calling ga_search_params_roi()...")
         
-        # Run ROI-based GA search
+        # Run ROI-based GA search (uses all fights with odds by default)
         best_params, best_roi = ga_search_params_roi(
             df,
             odds_df,
@@ -1220,7 +1535,7 @@ if __name__ == "__main__":
 
         print("\n=== GA best params (ROI-optimized) ===")
         print(best_params)
-        print(f"Best ROI on past year: {best_roi:.2f}%")
+        print(f"Best ROI on all fights with odds: {best_roi:.2f}%")
 
         # Train final Elo with best params on ALL DATA before test dates
         mov_params = {

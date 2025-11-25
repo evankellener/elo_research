@@ -17,6 +17,8 @@ from full_genetic_with_k_denom_mov import (
     calculate_oos_roi,
     ga_search_params_roi,
     run_basic_elo,
+    compute_prediction_metrics,
+    compute_extended_roi_metrics,
 )
 from elo_utils import add_bout_counts
 
@@ -359,6 +361,288 @@ class TestMainBlockModeRouting(unittest.TestCase):
         """Test that the mode condition 'args.mode == \"roi\"' correctly fails for accuracy mode"""
         args = self.parser.parse_args(["--mode", "accuracy"])
         self.assertFalse(args.mode == "roi", "Condition 'args.mode == \"roi\"' should be False for accuracy mode")
+
+
+class TestComputeExtendedROIMetrics(unittest.TestCase):
+    """Tests for compute_extended_roi_metrics function"""
+    
+    def test_empty_records_returns_none_metrics(self):
+        """Test that empty records return None for all metrics"""
+        result = compute_extended_roi_metrics([])
+        
+        self.assertIsNone(result['trend'])
+        self.assertIsNone(result['sharpe_ratio'])
+        self.assertIsNone(result['min_roi'])
+        self.assertIsNone(result['max_roi'])
+        self.assertIsNone(result['win_rate'])
+        self.assertEqual(result['num_bets'], 0)
+    
+    def test_returns_valid_metrics(self):
+        """Test that function returns all expected keys"""
+        bet_records = [
+            {'date': pd.Timestamp('2024-01-01'), 'profit': 0.5, 'bet_amount': 1.0, 'bet_won': 1},
+            {'date': pd.Timestamp('2024-01-02'), 'profit': -1.0, 'bet_amount': 1.0, 'bet_won': 0},
+            {'date': pd.Timestamp('2024-01-03'), 'profit': 0.3, 'bet_amount': 1.0, 'bet_won': 1},
+        ]
+        
+        result = compute_extended_roi_metrics(bet_records)
+        
+        required_keys = ['trend', 'sharpe_ratio', 'min_roi', 'max_roi', 'win_rate', 
+                        'num_bets', 'total_wagered', 'total_profit']
+        for key in required_keys:
+            self.assertIn(key, result)
+    
+    def test_win_rate_calculation(self):
+        """Test that win rate is calculated correctly"""
+        bet_records = [
+            {'date': pd.Timestamp('2024-01-01'), 'profit': 0.5, 'bet_amount': 1.0, 'bet_won': 1},
+            {'date': pd.Timestamp('2024-01-02'), 'profit': -1.0, 'bet_amount': 1.0, 'bet_won': 0},
+            {'date': pd.Timestamp('2024-01-03'), 'profit': 0.3, 'bet_amount': 1.0, 'bet_won': 1},
+            {'date': pd.Timestamp('2024-01-04'), 'profit': 0.2, 'bet_amount': 1.0, 'bet_won': 1},
+        ]
+        
+        result = compute_extended_roi_metrics(bet_records)
+        
+        # 3 wins out of 4 bets = 75%
+        self.assertAlmostEqual(result['win_rate'], 0.75)
+        self.assertEqual(result['num_bets'], 4)
+    
+    def test_total_profit_calculation(self):
+        """Test that total profit and wagered are calculated correctly"""
+        bet_records = [
+            {'date': pd.Timestamp('2024-01-01'), 'profit': 0.5, 'bet_amount': 1.0, 'bet_won': 1},
+            {'date': pd.Timestamp('2024-01-02'), 'profit': -1.0, 'bet_amount': 1.0, 'bet_won': 0},
+        ]
+        
+        result = compute_extended_roi_metrics(bet_records)
+        
+        self.assertAlmostEqual(result['total_profit'], -0.5)
+        self.assertAlmostEqual(result['total_wagered'], 2.0)
+
+
+class TestComputePredictionMetrics(unittest.TestCase):
+    """Tests for compute_prediction_metrics function"""
+    
+    def setUp(self):
+        """Set up test data"""
+        # Create sample fight data with Elo ratings
+        dates = pd.date_range(start='2023-01-01', end='2024-06-01', freq='ME')
+        
+        fighters = ['Fighter A', 'Fighter B', 'Fighter C', 'Fighter D']
+        data = []
+        
+        for i, date in enumerate(dates):
+            f1 = fighters[i % 4]
+            f2 = fighters[(i + 1) % 4]
+            data.append({
+                'DATE': date,
+                'FIGHTER': f1,
+                'opp_FIGHTER': f2,
+                'result': 1 if i % 2 == 0 else 0,
+                'win': 1 if i % 2 == 0 else 0,
+                'loss': 0 if i % 2 == 0 else 1,
+                'precomp_elo': 1500 + (i * 10),
+                'postcomp_elo': 1500 + (i * 10) + 20,
+                'opp_precomp_elo': 1500 - (i * 5),
+                'opp_postcomp_elo': 1500 - (i * 5) - 20,
+                'ko': 0, 'kod': 0, 'subw': 0, 'subwd': 0,
+                'udec': 1, 'udecd': 0, 'sdec': 0, 'sdecd': 0,
+                'mdec': 0, 'mdecd': 0
+            })
+        
+        self.df = pd.DataFrame(data)
+        self.df['DATE'] = pd.to_datetime(self.df['DATE']).dt.tz_localize(None)
+        
+        # Create empty odds data (not used for prediction metrics)
+        self.odds_df = pd.DataFrame({
+            'DATE': pd.to_datetime([]),
+            'FIGHTER': [],
+            'opp_FIGHTER': [],
+            'avg_odds': []
+        })
+    
+    def test_returns_required_keys(self):
+        """Test that function returns all required keys"""
+        result = compute_prediction_metrics(self.df, self.odds_df, lookback_days=0)
+        
+        required_keys = ['accuracy', 'log_loss', 'brier_score', 'total_predictions']
+        for key in required_keys:
+            self.assertIn(key, result)
+    
+    def test_accuracy_in_valid_range(self):
+        """Test that accuracy is between 0 and 1"""
+        result = compute_prediction_metrics(self.df, self.odds_df, lookback_days=0)
+        
+        if result['accuracy'] is not None:
+            self.assertGreaterEqual(result['accuracy'], 0)
+            self.assertLessEqual(result['accuracy'], 1)
+    
+    def test_brier_score_in_valid_range(self):
+        """Test that Brier score is between 0 and 1"""
+        result = compute_prediction_metrics(self.df, self.odds_df, lookback_days=0)
+        
+        if result['brier_score'] is not None:
+            self.assertGreaterEqual(result['brier_score'], 0)
+            self.assertLessEqual(result['brier_score'], 1)
+    
+    def test_log_loss_positive(self):
+        """Test that log loss is positive"""
+        result = compute_prediction_metrics(self.df, self.odds_df, lookback_days=0)
+        
+        if result['log_loss'] is not None:
+            self.assertGreater(result['log_loss'], 0)
+
+
+class TestEvaluateParamsROIExtended(unittest.TestCase):
+    """Tests for evaluate_params_roi with return_extended=True"""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Set up class-level resources"""
+        cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cls.data_file = os.path.join(cls.project_root, 'data', 'interleaved_cleaned.csv')
+        cls.odds_file = os.path.join(cls.project_root, 'after_averaging.csv')
+    
+    @unittest.skipIf(not os.path.exists(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+        'data', 'interleaved_cleaned.csv')), 
+        "interleaved_cleaned.csv not found")
+    def test_return_extended_returns_dict(self):
+        """Test that return_extended=True returns a dictionary with all metrics"""
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        params = {
+            'k': 32,
+            'w_ko': 1.4,
+            'w_sub': 1.3,
+            'w_udec': 1.0,
+            'w_sdec': 0.7,
+            'w_mdec': 0.9
+        }
+        
+        result = evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=True)
+        
+        self.assertIsInstance(result, dict)
+        
+        # Check all required keys exist
+        required_keys = ['roi_percent', 'trend', 'sharpe_ratio', 'min_roi', 'max_roi',
+                        'win_rate', 'num_bets', 'accuracy', 'log_loss', 'brier_score']
+        for key in required_keys:
+            self.assertIn(key, result)
+    
+    @unittest.skipIf(not os.path.exists(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+        'data', 'interleaved_cleaned.csv')), 
+        "interleaved_cleaned.csv not found")
+    def test_return_extended_false_returns_float(self):
+        """Test that return_extended=False returns a float"""
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        params = {
+            'k': 32,
+            'w_ko': 1.4,
+            'w_sub': 1.3,
+            'w_udec': 1.0,
+            'w_sdec': 0.7,
+            'w_mdec': 0.9
+        }
+        
+        result = evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=False)
+        
+        self.assertIsInstance(result, float)
+
+
+class TestGASearchParamsROIExtendedResults(unittest.TestCase):
+    """Tests for ga_search_params_roi with extended metrics in results"""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Set up class-level resources"""
+        cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cls.data_file = os.path.join(cls.project_root, 'data', 'interleaved_cleaned.csv')
+        cls.odds_file = os.path.join(cls.project_root, 'after_averaging.csv')
+    
+    @unittest.skipIf(not os.path.exists(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+        'data', 'interleaved_cleaned.csv')), 
+        "interleaved_cleaned.csv not found")
+    def test_all_results_contain_extended_metrics(self):
+        """Test that all_results contains extended metrics for each generation"""
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        best_params, best_roi, all_results = ga_search_params_roi(
+            df,
+            odds_df,
+            population_size=3,
+            generations=2,
+            seed=42,
+            verbose=False,
+            return_all_results=True
+        )
+        
+        # Check that extended metrics are in generation results
+        extended_keys = ['best_roi_percent', 'best_trend', 'best_sharpe_ratio',
+                        'best_min_roi', 'best_max_roi', 'best_win_rate', 'best_num_bets',
+                        'best_accuracy', 'best_log_loss', 'best_brier_score']
+        
+        for gen_result in all_results:
+            for key in extended_keys:
+                self.assertIn(key, gen_result, f"Missing key {key} in generation results")
+    
+    @unittest.skipIf(not os.path.exists(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+        'data', 'interleaved_cleaned.csv')), 
+        "interleaved_cleaned.csv not found")
+    def test_multi_objective_fitness_weights(self):
+        """Test that fitness_weights parameter works"""
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        # Test with multi-objective weights
+        best_params, best_roi = ga_search_params_roi(
+            df,
+            odds_df,
+            population_size=3,
+            generations=1,
+            seed=42,
+            verbose=False,
+            fitness_weights={'roi': 0.6, 'trend': 0.3, 'sharpe': 0.1}
+        )
+        
+        # Should not raise an error and should return valid results
+        self.assertIsInstance(best_params, dict)
+        self.assertIsInstance(best_roi, float)
 
 
 if __name__ == '__main__':
