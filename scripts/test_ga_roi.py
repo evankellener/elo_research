@@ -45,20 +45,20 @@ class TestAmericanOddsToDecimal(unittest.TestCase):
 class TestBuildBidirectionalOddsLookup(unittest.TestCase):
     """Tests for build_bidirectional_odds_lookup function"""
     
-    def test_creates_both_directions(self):
-        """Test that odds lookup creates entries for both fighter orderings"""
+    def test_creates_entries_for_each_fighter(self):
+        """Test that odds lookup creates entries for each fighter's perspective"""
         odds_df = pd.DataFrame({
             'DATE': pd.to_datetime(['2024-01-01', '2024-01-01']),
             'FIGHTER': ['Fighter A', 'Fighter B'],
             'opp_FIGHTER': ['Fighter B', 'Fighter A'],
-            'avg_odds': [-200, 150]
+            'avg_odds': [-200, 150]  # A is favorite, B is underdog
         })
         
         lookup = build_bidirectional_odds_lookup(odds_df)
         
-        # Both directions should be in lookup
-        self.assertIn(('Fighter A', 'Fighter B', '2024-01-01'), lookup)
-        self.assertIn(('Fighter B', 'Fighter A', '2024-01-01'), lookup)
+        # Both fighters' perspectives should be in lookup with their own odds
+        self.assertEqual(lookup[('Fighter A', 'Fighter B', '2024-01-01')], -200)
+        self.assertEqual(lookup[('Fighter B', 'Fighter A', '2024-01-01')], 150)
     
     def test_handles_nan_odds(self):
         """Test that NaN odds are not added to lookup"""
@@ -132,7 +132,7 @@ class TestEvaluateParamsROI(unittest.TestCase):
     
     def test_returns_numeric_roi(self):
         """Test that evaluate_params_roi returns a numeric ROI value"""
-        roi = evaluate_params_roi(self.df, self.odds_df, self.sample_params, past_year_only=True)
+        roi = evaluate_params_roi(self.df, self.odds_df, self.sample_params, lookback_days=365)
         self.assertIsInstance(roi, float)
     
     def test_returns_zero_when_no_odds(self):
@@ -144,7 +144,7 @@ class TestEvaluateParamsROI(unittest.TestCase):
             'avg_odds': []
         })
         
-        roi = evaluate_params_roi(self.df, empty_odds, self.sample_params, past_year_only=True)
+        roi = evaluate_params_roi(self.df, empty_odds, self.sample_params, lookback_days=365)
         self.assertEqual(roi, 0.0)
 
 
@@ -321,7 +321,7 @@ class TestDrawHandling(unittest.TestCase):
         }
         
         # ROI should be 0 because draw is skipped
-        roi = evaluate_params_roi(df, odds_df, params, past_year_only=False)
+        roi = evaluate_params_roi(df, odds_df, params, lookback_days=0)
         self.assertEqual(roi, 0.0)
 
 

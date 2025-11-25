@@ -467,11 +467,19 @@ def build_bidirectional_odds_lookup(odds_df):
     (opponent, fighter, date) so that odds can be found regardless of
     which fighter has the higher Elo rating.
     
+    IMPORTANT: The odds_df should contain rows for BOTH fighters in each fight,
+    with each fighter's correct odds in their respective row. For example:
+    - Row 1: FIGHTER='Fighter A', opp_FIGHTER='Fighter B', avg_odds=-150 (A is favorite)
+    - Row 2: FIGHTER='Fighter B', opp_FIGHTER='Fighter A', avg_odds=+120 (B is underdog)
+    
+    If odds_df only has one row per fight, the reverse key will fall back to
+    using the same odds, which may not be accurate for ROI calculations.
+    
     Args:
         odds_df: DataFrame with DATE, FIGHTER, opp_FIGHTER, and avg_odds columns
     
     Returns:
-        dict: Mapping (fighter, opponent, date_str) -> avg_odds value
+        dict: Mapping (fighter, opponent, date_str) -> avg_odds value for that fighter
     """
     odds_lookup = {}
     
@@ -480,30 +488,25 @@ def build_bidirectional_odds_lookup(odds_df):
             date_str = str(pd.to_datetime(row['DATE']).date())
             key = (row['FIGHTER'], row['opp_FIGHTER'], date_str)
             odds_lookup[key] = row['avg_odds']
-            # Also store reverse key so lookup works when opponent has higher Elo
-            reverse_key = (row['opp_FIGHTER'], row['FIGHTER'], date_str)
-            if reverse_key not in odds_lookup:
-                # Store the opponent's perspective odds (we need to look it up separately if available)
-                # For now, store a placeholder - the actual odds will be looked up correctly
-                odds_lookup[reverse_key] = row['avg_odds']
     
     return odds_lookup
 
 
-def evaluate_params_roi(df, odds_df, params, past_year_only=True):
+def evaluate_params_roi(df, odds_df, params, lookback_days=365):
     """
-    Run Elo with given params and return ROI% for past year of fights.
+    Run Elo with given params and return ROI% for recent fights.
     
     This function:
     1. Trains Elo model on ALL historical data using the candidate parameters
-    2. Calculates ROI by simulating $1 bets on the higher-rated fighter for fights in the past year
+    2. Calculates ROI by simulating $1 bets on the higher-rated fighter for recent fights
     3. Returns ROI% as the fitness metric
     
     Args:
         df: Training data (all historical fight data with DATE, FIGHTER, opp_FIGHTER, result)
         odds_df: Odds data with DATE, FIGHTER, opp_FIGHTER, avg_odds columns
         params: Dict with k, w_ko, w_sub, w_udec, w_sdec, w_mdec
-        past_year_only: If True, only calculate ROI on fights in the past 12 months
+        lookback_days: Number of days to look back for ROI calculation (default 365)
+                       Set to 0 or None to use all data
     
     Returns:
         float: ROI percentage (0 if no valid bets)
@@ -520,10 +523,10 @@ def evaluate_params_roi(df, odds_df, params, past_year_only=True):
     # Train Elo on ALL historical data
     df_with_elo = run_basic_elo(df.copy(), k=k, mov_params=mov_params)
     
-    # Filter to past year if requested
-    if past_year_only:
+    # Filter to recent fights if requested
+    if lookback_days and lookback_days > 0:
         max_date = df_with_elo["DATE"].max()
-        cutoff_date = max_date - pd.Timedelta(days=365)
+        cutoff_date = max_date - pd.Timedelta(days=lookback_days)
         test_df = df_with_elo[df_with_elo["DATE"] > cutoff_date].copy()
     else:
         test_df = df_with_elo.copy()
@@ -618,10 +621,10 @@ def evaluate_params_roi(df, odds_df, params, past_year_only=True):
 
 def _calculate_roi_worker(args):
     """Module-level worker function for parallel ROI calculation (must be at module level for multiprocessing)"""
-    params_dict, train_data, odds_data = args
+    params_dict, train_data, odds_data, lookback_days = args
     params = params_dict["params"]
     
-    roi = evaluate_params_roi(train_data, odds_data, params, past_year_only=True)
+    roi = evaluate_params_roi(train_data, odds_data, params, lookback_days=lookback_days)
     return params_dict["index"], roi
 
 
@@ -631,6 +634,7 @@ def ga_search_params_roi(
     test_df=None,
     population_size=30,
     generations=30,
+    lookback_days=365,
     seed=42,
     return_all_results=False,
     verbose=True,
@@ -638,11 +642,11 @@ def ga_search_params_roi(
     """
     Full GA search over k and method of victory weights using ROI as fitness.
     
-    This function optimizes parameters to maximize ROI on past year of fights:
+    This function optimizes parameters to maximize ROI on recent fights:
     1. Load all historical fight data
     2. For each candidate parameter set:
        - Train Elo model on ALL historical data using the candidate parameters
-       - Calculate ROI by simulating $1 bets on the higher-rated fighter for fights in the past year
+       - Calculate ROI by simulating $1 bets on the higher-rated fighter for recent fights
        - Use ROI% as the fitness metric
     3. Evolve parameters to maximize ROI%
     
@@ -652,6 +656,7 @@ def ga_search_params_roi(
         test_df: Optional test data for OOS evaluation tracking (does not affect fitness)
         population_size: Number of individuals in each generation
         generations: Number of generations to evolve
+        lookback_days: Number of days to look back for ROI calculation (default 365)
         seed: Random seed for reproducibility (None for random)
         return_all_results: If True, returns list of all generation results
         verbose: If True, prints progress for each generation
@@ -667,15 +672,15 @@ def ga_search_params_roi(
     odds_df = odds_df.copy()
     odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
     
-    # Calculate cutoff date for past year (for display purposes)
+    # Calculate cutoff date for lookback period (for display purposes)
     max_date = df["DATE"].max()
-    past_year_cutoff = max_date - pd.Timedelta(days=365)
+    lookback_cutoff = max_date - pd.Timedelta(days=lookback_days)
     
     if verbose:
-        print(f"Optimizing ROI for fights from {past_year_cutoff.date()} to {max_date.date()}")
+        print(f"Optimizing ROI for fights from {lookback_cutoff.date()} to {max_date.date()}")
         print(f"Total historical fights: {len(df)}")
-        past_year_fights = df[df["DATE"] > past_year_cutoff]
-        print(f"Past year fights: {len(past_year_fights)}")
+        recent_fights = df[df["DATE"] > lookback_cutoff]
+        print(f"Fights in lookback period ({lookback_days} days): {len(recent_fights)}")
     
     all_results = []
     
@@ -683,7 +688,7 @@ def ga_search_params_roi(
     population = []
     for i in range(population_size):
         p = random_params()
-        fitness = evaluate_params_roi(df, odds_df, p, past_year_only=True)
+        fitness = evaluate_params_roi(df, odds_df, p, lookback_days=lookback_days)
         population.append({"params": p, "fitness": fitness})
     
     best_ind = max(population, key=lambda ind: ind["fitness"])
@@ -712,7 +717,7 @@ def ga_search_params_roi(
             child_params = crossover(parent1, parent2)
             child_params = mutate(child_params)
             
-            fitness = evaluate_params_roi(df, odds_df, child_params, past_year_only=True)
+            fitness = evaluate_params_roi(df, odds_df, child_params, lookback_days=lookback_days)
             new_population.append({"params": child_params, "fitness": fitness})
         
         population = new_population
