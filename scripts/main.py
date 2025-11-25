@@ -1,7 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-from elo_utils import method_of_victory_scale, build_fighter_history, has_prior_history
+from elo_utils import method_of_victory_scale, build_fighter_history, has_prior_history, is_true
 
 def run_basic_elo_with_mov(df, k = 167.19618191211478, base_elo = 1500, denominator = 400, draw_k_factor = 0.5, 
                            w_ko=None, w_sub=None, w_udec=None, w_sdec=None, w_mdec=None):
@@ -933,14 +933,21 @@ def get_method_of_victory(row):
     """
     Determine the method of victory from fight data.
     
+    The data contains paired flags for each outcome type:
+    - 'ko'/'kod': KO/TKO win/loss respectively
+    - 'subw'/'subwd': Submission win/loss
+    - 'udec'/'udecd': Unanimous decision win/loss
+    - 'sdec'/'sdecd': Split decision win/loss  
+    - 'mdec'/'mdecd': Majority decision win/loss
+    
+    We check both flags to determine the method regardless of which fighter won.
+    
     Args:
-        row: DataFrame row containing MOV flags (ko, subw, udec, sdec, mdec)
+        row: DataFrame row containing MOV flags
     
     Returns:
         String describing the method of victory
     """
-    from elo_utils import is_true
-    
     if is_true(row.get('ko')) or is_true(row.get('kod')):
         return 'KO/TKO'
     if is_true(row.get('subw')) or is_true(row.get('subwd')):
@@ -952,6 +959,25 @@ def get_method_of_victory(row):
     if is_true(row.get('mdec')) or is_true(row.get('mdecd')):
         return 'Majority Decision'
     return 'Unknown'
+
+
+def _normalize_datetime(dt_series):
+    """
+    Normalize a datetime series by removing timezone information if present.
+    
+    Handles both timezone-aware and timezone-naive datetimes safely.
+    
+    Args:
+        dt_series: pandas Series of datetime values
+    
+    Returns:
+        pandas Series with timezone-naive datetimes
+    """
+    dt_series = pd.to_datetime(dt_series)
+    # Check if the series has timezone info
+    if dt_series.dt.tz is not None:
+        return dt_series.dt.tz_localize(None)
+    return dt_series
 
 
 def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed=None):
@@ -997,7 +1023,7 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
     
     # Build lookup for Elo data from df
     df_copy = df.copy()
-    df_copy['DATE'] = pd.to_datetime(df_copy['DATE']).dt.tz_localize(None)
+    df_copy['DATE'] = _normalize_datetime(df_copy['DATE'])
     
     # Create lookup dictionary for Elo and fight details
     elo_lookup = {}
@@ -1019,7 +1045,7 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
     odds_lookup = {}
     if odds_df is not None:
         odds_df_copy = odds_df.copy()
-        odds_df_copy['DATE'] = pd.to_datetime(odds_df_copy['DATE']).dt.tz_localize(None)
+        odds_df_copy['DATE'] = _normalize_datetime(odds_df_copy['DATE'])
         for _, row in odds_df_copy.iterrows():
             key = (row['FIGHTER'], row['opp_FIGHTER'], str(row['DATE'].date()))
             if key not in odds_lookup:
