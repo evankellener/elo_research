@@ -494,14 +494,14 @@ def build_bidirectional_odds_lookup(odds_df):
     return odds_lookup
 
 
-def compute_prediction_metrics(df_with_elo, odds_df, lookback_days=365):
+def compute_prediction_metrics(df_with_elo, odds_df, lookback_days=0):
     """
     Compute accuracy, log loss, and Brier score for Elo predictions.
     
     Args:
         df_with_elo: DataFrame with Elo ratings already calculated
         odds_df: Odds data for ROI calculations
-        lookback_days: Number of days to look back (0 or None for all data)
+        lookback_days: Number of days to look back (0 or None for all data, default 0)
     
     Returns:
         dict: Contains 'accuracy', 'log_loss', 'brier_score', 'total_predictions'
@@ -602,7 +602,8 @@ def compute_extended_roi_metrics(bet_records):
         bet_records: List of dicts with keys: date, profit, bet_amount, bet_won
     
     Returns:
-        dict: Contains trend, sharpe_ratio, min_roi, max_roi, win_rate, num_bets
+        dict: Contains 'trend', 'sharpe_ratio', 'min_roi', 'max_roi', 'win_rate', 
+              'num_bets', 'total_wagered', 'total_profit'
     """
     if not bet_records:
         return {
