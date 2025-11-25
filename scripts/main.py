@@ -243,11 +243,16 @@ def compute_roi_predictions(df, odds_df=None):
     processed_fights = set()  # Track unique fights to avoid double counting
     
     # Build odds lookup for efficient access when betting on opponent
+    # Store both directions so lookup works regardless of which fighter has higher Elo
     odds_by_fight = {}
     for _, row in df.iterrows():
         if pd.notna(row.get('avg_odds')):
             key = (row['FIGHTER'], row['opp_FIGHTER'], str(row['DATE']))
             odds_by_fight[key] = row['avg_odds']
+            # Also store reverse key so lookup works when opponent has higher Elo
+            reverse_key = (row['opp_FIGHTER'], row['FIGHTER'], str(row['DATE']))
+            if reverse_key not in odds_by_fight:
+                odds_by_fight[reverse_key] = row['avg_odds']
     
     for _, row in df.iterrows():
         # Skip invalid results
