@@ -981,6 +981,25 @@ def _normalize_datetime(dt_series):
     return dt_series
 
 
+def _is_valid_odds(odds_val):
+    """
+    Check if odds value is valid (numeric and not NaN).
+    
+    Args:
+        odds_val: The odds value to check
+    
+    Returns:
+        True if the odds value is a valid number, False otherwise
+    """
+    if odds_val is None or pd.isna(odds_val) or odds_val == '':
+        return False
+    try:
+        float(odds_val)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed=None):
     """
     Randomly select and analyze n unique events, showing ALL valid fights from each event.
@@ -1217,23 +1236,12 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
             if fighter_pre_elo is not None and opp_pre_elo is not None:
                 elo_diff = abs(fighter_pre_elo - opp_pre_elo)
             
-            # Helper function to check if odds value is valid
-            def is_valid_odds(odds_val):
-                """Check if odds value is valid (numeric and not NaN)."""
-                if odds_val is None or pd.isna(odds_val) or odds_val == '':
-                    return False
-                try:
-                    float(odds_val)
-                    return True
-                except (ValueError, TypeError):
-                    return False
-            
             # Determine reason why bet wasn't placed
             # At this point, the fight passed all filtering criteria (valid result, prior history, Elo)
             fighter_odds = odds_data_fighter.get('avg_odds')
             opp_odds = odds_data_opponent.get('avg_odds')
-            fighter_has_valid_odds = is_valid_odds(fighter_odds)
-            opp_has_valid_odds = is_valid_odds(opp_odds)
+            fighter_has_valid_odds = _is_valid_odds(fighter_odds)
+            opp_has_valid_odds = _is_valid_odds(opp_odds)
             
             if fighter_pre_elo == opp_pre_elo:
                 reason_no_bet = 'Equal Elo'
