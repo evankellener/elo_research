@@ -251,6 +251,8 @@ def compute_roi_predictions(df, odds_df=None):
         odds_by_fight = odds_lookup
     else:
         # Build from df - store both directions so lookup works regardless of which fighter has higher Elo
+        # Note: When only one row exists for a fight, the reverse key will use the same odds.
+        # This is a best-effort fallback - ideally odds_df should be provided with both perspectives.
         odds_by_fight = {}
         for _, row in df.iterrows():
             if pd.notna(row.get('avg_odds')):
