@@ -1198,6 +1198,7 @@ if __name__ == "__main__":
         df["opp_precomp_boutcount"] = pd.to_numeric(df["opp_precomp_boutcount"], errors="coerce")
 
     print(f"Test data date range: {test_df['date'].min()} to {test_df['date'].max()}")
+    print(f"Running in mode: {args.mode}")
 
     if args.mode == "roi":
         print("\n" + "="*60)
