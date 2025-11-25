@@ -138,6 +138,59 @@ class TestComputeROIPredictions(unittest.TestCase):
         # Function should not crash and should return valid structure
         self.assertIn('total_bets', result)
         self.assertIn('roi_percent', result)
+    
+    def test_odds_lookup_uses_odds_df_for_opponent(self):
+        """Test that compute_roi_predictions correctly looks up opponent odds from odds_df.
+        
+        This test verifies the fix for the issue where fights with valid odds in odds_df
+        were being skipped because the opponent odds lookup was using df (single perspective)
+        instead of odds_df (both perspectives).
+        
+        Example: Zac Pauga vs Bogdan Guskov - Guskov has higher Elo, so we bet on Guskov,
+        but need to find Guskov's odds from odds_df.
+        """
+        # Create test data where FIGHTER has lower Elo and we need to bet on opponent
+        # df has only one row per fight (FIGHTER perspective)
+        # Need to establish prior history for both fighters
+        df = pd.DataFrame({
+            'DATE': pd.to_datetime([
+                # First fights to establish history (2023-01-01)
+                '2023-01-01', '2023-01-01',
+                # Fight on 2024-01-01 - Zac Pauga vs Higher Elo
+                # Only one perspective in df (Zac Pauga's)
+                '2024-01-01'
+            ]),
+            'FIGHTER': ['Zac Pauga', 'Higher Elo', 'Zac Pauga'],
+            'opp_FIGHTER': ['SomeoneElse1', 'SomeoneElse2', 'Higher Elo'],
+            'result': [1, 1, 0],  # Win first fights, Zac Pauga loses to Higher Elo
+            'precomp_elo': [1500, 1500, 1326],
+            'opp_precomp_elo': [1400, 1400, 1446],  # Higher Elo has higher Elo rating
+            'postcomp_elo': [1550, 1550, 1280],
+            'opp_postcomp_elo': [1350, 1350, 1490],
+        })
+        
+        # odds_df has both perspectives with valid odds for Higher Elo
+        odds_df = pd.DataFrame({
+            'DATE': pd.to_datetime(['2024-01-01', '2024-01-01']),
+            'FIGHTER': ['Zac Pauga', 'Higher Elo'],
+            'opp_FIGHTER': ['Higher Elo', 'Zac Pauga'],
+            'result': [0, 1],
+            'avg_odds': [-121, 102]  # Zac is favorite, Higher Elo is underdog
+        })
+        
+        result = compute_roi_predictions(df, odds_df=odds_df)
+        
+        # The bet should be placed on Higher Elo (who has higher Elo rating)
+        # This only works if the function correctly looks up odds from odds_df
+        self.assertGreater(result['total_bets'], 0, 
+            "Should have at least one bet when opponent has higher Elo and valid odds in odds_df")
+        
+        # Check that the bet was placed on Higher Elo
+        records = result['records']
+        if not records.empty:
+            higher_elo_bets = records[records['bet_on'] == 'Higher Elo']
+            self.assertGreater(len(higher_elo_bets), 0,
+                "Should bet on the fighter with higher Elo (Higher Elo)")
 
 
 class TestComputeROIOverTime(unittest.TestCase):

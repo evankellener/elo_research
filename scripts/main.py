@@ -242,13 +242,6 @@ def compute_roi_predictions(df, odds_df=None):
     total_returned = 0
     processed_fights = set()  # Track unique fights to avoid double counting
     
-    # Build odds lookup for efficient access when betting on opponent
-    odds_by_fight = {}
-    for _, row in df.iterrows():
-        if pd.notna(row.get('avg_odds')):
-            key = (row['FIGHTER'], row['opp_FIGHTER'], str(row['DATE']))
-            odds_by_fight[key] = row['avg_odds']
-    
     for _, row in df.iterrows():
         # Skip invalid results
         if row['result'] not in (0, 1):
@@ -288,12 +281,13 @@ def compute_roi_predictions(df, odds_df=None):
             elo_diff = row['precomp_elo'] - row['opp_precomp_elo']
         else:
             # Opponent has higher Elo, need to find opponent's row for their odds
+            # Use odds_lookup (from odds_df) since it has both perspectives
             opp_key = (row['opp_FIGHTER'], row['FIGHTER'], str(row['DATE']))
-            if opp_key not in odds_by_fight:
+            if opp_key not in odds_lookup:
                 continue
             bet_on = row['opp_FIGHTER']
             bet_against = row['FIGHTER']
-            bet_odds = odds_by_fight[opp_key]
+            bet_odds = odds_lookup[opp_key]
             # result=0 means FIGHTER lost, so opponent (our bet) won
             bet_won = (row['result'] == 0)
             elo_diff = row['opp_precomp_elo'] - row['precomp_elo']
@@ -987,6 +981,25 @@ def _normalize_datetime(dt_series):
     return dt_series
 
 
+def _is_valid_odds(odds_val):
+    """
+    Check if odds value is valid (numeric and not NaN).
+    
+    Args:
+        odds_val: The odds value to check
+    
+    Returns:
+        True if the odds value is a valid number, False otherwise
+    """
+    if odds_val is None or pd.isna(odds_val) or odds_val == '':
+        return False
+    try:
+        float(odds_val)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed=None):
     """
     Randomly select and analyze n unique events, showing ALL valid fights from each event.
@@ -1195,7 +1208,10 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
             
             # Get fight details
             elo_data = elo_lookup.get(key1, {})
-            odds_data = odds_lookup.get(key1, odds_lookup.get(key2, {}))
+            odds_data_fighter = odds_lookup.get(key1, {})
+            odds_data_opponent = odds_lookup.get(key2, {})
+            # Use fighter's odds for display, fall back to opponent's odds
+            odds_data = odds_data_fighter if odds_data_fighter else odds_data_opponent
             
             # Determine winner based on result and Elo information
             fighter_won = (row['result'] == 1)
@@ -1222,16 +1238,31 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
             
             # Determine reason why bet wasn't placed
             # At this point, the fight passed all filtering criteria (valid result, prior history, Elo)
-            # The reason it wasn't bet on is either:
-            # 1. No odds available
-            # 2. Equal Elo ratings (can't determine which fighter to bet on)
-            # 3. Other filtering in compute_roi_predictions
-            if not odds_data.get('avg_odds'):
-                reason_no_bet = 'No odds available'
-            elif fighter_pre_elo == opp_pre_elo:
-                reason_no_bet = 'Equal Elo ratings'
+            fighter_odds = odds_data_fighter.get('avg_odds')
+            opp_odds = odds_data_opponent.get('avg_odds')
+            fighter_has_valid_odds = _is_valid_odds(fighter_odds)
+            opp_has_valid_odds = _is_valid_odds(opp_odds)
+            
+            if fighter_pre_elo == opp_pre_elo:
+                reason_no_bet = 'Equal Elo'
+            elif not fighter_has_valid_odds and not opp_has_valid_odds:
+                reason_no_bet = 'No odds data'
+            elif fighter_pre_elo is not None and opp_pre_elo is not None:
+                # Determine which fighter would be bet on (higher Elo)
+                if fighter_pre_elo > opp_pre_elo:
+                    # We'd bet on fighter, check if their odds are valid
+                    if not fighter_has_valid_odds:
+                        reason_no_bet = 'No odds data'
+                    else:
+                        reason_no_bet = 'Unknown'
+                else:
+                    # We'd bet on opponent, check if their odds are valid
+                    if not opp_has_valid_odds:
+                        reason_no_bet = 'Opp odds invalid'
+                    else:
+                        reason_no_bet = 'Unknown'
             else:
-                reason_no_bet = 'Odds data mismatch'
+                reason_no_bet = 'Unknown'
             
             fight_details = {
                 'fighter': fighter,
