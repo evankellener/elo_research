@@ -153,6 +153,577 @@ def compute_fight_predictions(df):
         )
     return pd.DataFrame(records)
 
+
+def american_odds_to_decimal(odds):
+    """
+    Convert American odds to decimal odds.
+    
+    American odds format:
+    - Positive odds (e.g., +150): Profit from a $100 bet. +150 means win $150 on $100.
+      Decimal = (odds / 100) + 1 = (150/100) + 1 = 2.50
+    - Negative odds (e.g., -200): Amount to bet to win $100. -200 means bet $200 to win $100.
+      Decimal = (100 / |odds|) + 1 = (100/200) + 1 = 1.50
+    
+    Args:
+        odds: American odds value (positive or negative float)
+    
+    Returns:
+        Decimal odds value, or None if input is NaN
+    
+    Examples:
+        >>> american_odds_to_decimal(150)   # +150 underdog
+        2.5
+        >>> american_odds_to_decimal(-200)  # -200 favorite
+        1.5
+    """
+    if pd.isna(odds):
+        return None
+    if odds > 0:
+        return (odds / 100) + 1
+    else:
+        return (100 / abs(odds)) + 1
+
+
+def compute_roi_predictions(df, odds_df=None):
+    """
+    Calculate ROI, log loss, and brier score for Elo-based betting predictions.
+    
+    This function simulates betting on the fighter with the higher Elo rating
+    and calculates returns based on betting odds.
+    
+    Args:
+        df: DataFrame with fight data including precomp_elo, opp_precomp_elo, 
+            result, and DATE columns (Elo values calculated by run_basic_elo)
+        odds_df: Optional DataFrame with odds data (e.g., from after_averaging.csv).
+                 If provided, odds are merged by matching FIGHTER, opp_FIGHTER, and DATE.
+                 If not provided, df must contain avg_odds column.
+    
+    Returns:
+        dict: Dictionary containing ROI%, log loss, brier score, and detailed records
+    """
+    # If odds_df is provided, merge odds into df
+    if odds_df is not None:
+        # Create a copy to avoid modifying original
+        df = df.copy()
+        
+        # Prepare odds lookup from odds_df
+        odds_df = odds_df.copy()
+        # Normalize dates - remove timezone info for consistent matching
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        
+        # Create a lookup dictionary for odds: (fighter, opponent, date) -> avg_odds
+        odds_lookup = {}
+        for _, row in odds_df.iterrows():
+            if pd.notna(row.get('avg_odds')):
+                key = (row['FIGHTER'], row['opp_FIGHTER'], str(row['DATE']))
+                odds_lookup[key] = row['avg_odds']
+        
+        # Add odds to df by matching
+        def get_odds(row):
+            key = (row['FIGHTER'], row['opp_FIGHTER'], str(row['DATE']))
+            return odds_lookup.get(key, np.nan)
+        
+        df['avg_odds'] = df.apply(get_odds, axis=1)
+        print(f"Matched {df['avg_odds'].notna().sum()} fights with odds data out of {len(df)} total fights")
+    
+    history = build_fighter_history(df)
+    first_fight_dates = history.groupby('fighter')['date'].min().to_dict()
+    
+    records = []
+    total_wagered = 0
+    total_returned = 0
+    processed_fights = set()  # Track unique fights to avoid double counting
+    
+    # Build odds lookup for efficient access when betting on opponent
+    odds_by_fight = {}
+    for _, row in df.iterrows():
+        if pd.notna(row.get('avg_odds')):
+            key = (row['FIGHTER'], row['opp_FIGHTER'], str(row['DATE']))
+            odds_by_fight[key] = row['avg_odds']
+    
+    for _, row in df.iterrows():
+        # Skip invalid results
+        if row['result'] not in (0, 1):
+            continue
+        if pd.isna(row['DATE']):
+            continue
+        if row['precomp_elo'] == row['opp_precomp_elo']:
+            continue
+        if not has_prior_history(first_fight_dates, row['FIGHTER'], row['DATE']):
+            continue
+        if not has_prior_history(first_fight_dates, row['opp_FIGHTER'], row['DATE']):
+            continue
+        
+        # Create a unique key for each fight (sorted fighter names + date)
+        fight_key = tuple(sorted([row['FIGHTER'], row['opp_FIGHTER']])) + (str(row['DATE']),)
+        if fight_key in processed_fights:
+            continue
+        processed_fights.add(fight_key)
+        
+        # Skip rows without odds data
+        if pd.isna(row.get('avg_odds')):
+            continue
+        
+        # Determine the higher Elo fighter
+        fighter_has_higher_elo = row['precomp_elo'] > row['opp_precomp_elo']
+        
+        # We always bet on the higher Elo fighter
+        # If FIGHTER has higher Elo, use this row's odds directly
+        # If opponent has higher Elo, we need to find the opponent's row for odds
+        if fighter_has_higher_elo:
+            # FIGHTER is our bet - use this row
+            bet_on = row['FIGHTER']
+            bet_against = row['opp_FIGHTER']
+            bet_odds = row['avg_odds']
+            # result=1 means FIGHTER won (our bet won)
+            bet_won = (row['result'] == 1)
+            elo_diff = row['precomp_elo'] - row['opp_precomp_elo']
+        else:
+            # Opponent has higher Elo, need to find opponent's row for their odds
+            opp_key = (row['opp_FIGHTER'], row['FIGHTER'], str(row['DATE']))
+            if opp_key not in odds_by_fight:
+                continue
+            bet_on = row['opp_FIGHTER']
+            bet_against = row['FIGHTER']
+            bet_odds = odds_by_fight[opp_key]
+            # result=0 means FIGHTER lost, so opponent (our bet) won
+            bet_won = (row['result'] == 0)
+            elo_diff = row['opp_precomp_elo'] - row['precomp_elo']
+        
+        # Calculate expected probability from Elo (for log loss and brier score)
+        # expected_prob is the probability we assign to our bet winning
+        expected_prob = 1 / (1 + 10 ** (-elo_diff / 400))
+        
+        # Convert American odds to decimal odds
+        decimal_odds = american_odds_to_decimal(bet_odds)
+        if decimal_odds is None:
+            continue
+        
+        # Simulate $1 bet on the higher Elo fighter
+        bet_amount = 1.0
+        total_wagered += bet_amount
+        
+        if bet_won:
+            payout = bet_amount * decimal_odds
+        else:
+            payout = 0
+        
+        total_returned += payout
+        
+        records.append({
+            'date': row['DATE'],
+            'bet_on': bet_on,
+            'bet_against': bet_against,
+            'bet_won': int(bet_won),
+            'elo_diff': elo_diff,
+            'expected_prob': expected_prob,
+            'avg_odds': bet_odds,
+            'decimal_odds': decimal_odds,
+            'bet_amount': bet_amount,
+            'payout': payout,
+            'profit': payout - bet_amount
+        })
+    
+    if not records:
+        return {
+            'roi_percent': None,
+            'log_loss': None,
+            'brier_score': None,
+            'accuracy': None,
+            'total_bets': 0,
+            'records': pd.DataFrame()
+        }
+    
+    records_df = pd.DataFrame(records)
+    
+    # Calculate ROI
+    total_profit = total_returned - total_wagered
+    roi_percent = (total_profit / total_wagered) * 100 if total_wagered > 0 else 0
+    
+    # Calculate accuracy
+    accuracy = records_df['bet_won'].mean()
+    
+    # Calculate Log Loss
+    # Log loss = -1/N * sum(y * log(p) + (1-y) * log(1-p))
+    # where y is actual result (bet_won) and p is predicted probability
+    epsilon = 1e-10  # Small value to avoid log(0), using 1e-10 for numerical stability
+    expected_probs = records_df['expected_prob'].clip(epsilon, 1 - epsilon)
+    actual_results = records_df['bet_won']
+    log_loss = -np.mean(
+        actual_results * np.log(expected_probs) + 
+        (1 - actual_results) * np.log(1 - expected_probs)
+    )
+    
+    # Calculate Brier Score
+    # Brier score = 1/N * sum((p - y)^2)
+    # where y is actual result (bet_won) and p is predicted probability
+    brier_score = np.mean((expected_probs - actual_results) ** 2)
+    
+    return {
+        'roi_percent': roi_percent,
+        'log_loss': log_loss,
+        'brier_score': brier_score,
+        'accuracy': accuracy,
+        'total_bets': len(records),
+        'total_wagered': total_wagered,
+        'total_returned': total_returned,
+        'total_profit': total_profit,
+        'records': records_df
+    }
+
+
+def display_roi_metrics(roi_results):
+    """
+    Display ROI metrics in a formatted way.
+    
+    Args:
+        roi_results: Dictionary returned by compute_roi_predictions()
+    """
+    print("\n" + "="*60)
+    print("ROI & BETTING METRICS (Elo-based predictions)")
+    print("="*60)
+    
+    if roi_results['total_bets'] == 0:
+        print("No valid bets to analyze.")
+        return
+    
+    print(f"\nTotal Bets: {roi_results['total_bets']}")
+    print(f"Total Wagered: ${roi_results['total_wagered']:.2f}")
+    print(f"Total Returned: ${roi_results['total_returned']:.2f}")
+    print(f"Total Profit/Loss: ${roi_results['total_profit']:.2f}")
+    print(f"\nROI: {roi_results['roi_percent']:.2f}%")
+    print(f"Accuracy: {roi_results['accuracy']:.4f} ({roi_results['accuracy']*100:.2f}%)")
+    print(f"\nLog Loss: {roi_results['log_loss']:.4f}")
+    print(f"Brier Score: {roi_results['brier_score']:.4f}")
+    print("="*60)
+
+
+def compute_roi_over_time(roi_results, group_by='event'):
+    """
+    Calculate ROI over time, broken down by event or time period.
+    
+    Args:
+        roi_results: Dictionary returned by compute_roi_predictions() containing 'records' DataFrame
+        group_by: How to group results - 'event' (by date/event), 'month', or 'year'
+    
+    Returns:
+        DataFrame with cumulative ROI metrics over time
+    """
+    records_df = roi_results.get('records')
+    if records_df is None or records_df.empty:
+        return pd.DataFrame()
+    
+    # Sort by date
+    records_df = records_df.copy()
+    records_df['date'] = pd.to_datetime(records_df['date'])
+    records_df = records_df.sort_values('date')
+    
+    # Create grouping column based on group_by parameter
+    if group_by == 'month':
+        records_df['period'] = records_df['date'].dt.to_period('M').astype(str)
+    elif group_by == 'year':
+        records_df['period'] = records_df['date'].dt.year.astype(str)
+    else:  # 'event' - group by date (each event)
+        records_df['period'] = records_df['date'].dt.date.astype(str)
+    
+    # Calculate metrics by period
+    period_stats = records_df.groupby('period').agg({
+        'bet_amount': 'sum',
+        'payout': 'sum',
+        'profit': 'sum',
+        'bet_won': ['sum', 'count', 'mean'],
+        'expected_prob': 'mean'
+    }).reset_index()
+    
+    # Flatten column names
+    period_stats.columns = ['period', 'wagered', 'returned', 'profit', 
+                           'wins', 'bets', 'accuracy', 'avg_expected_prob']
+    
+    # Calculate period ROI
+    period_stats['roi_percent'] = (period_stats['profit'] / period_stats['wagered']) * 100
+    
+    # Calculate cumulative metrics
+    period_stats['cumulative_wagered'] = period_stats['wagered'].cumsum()
+    period_stats['cumulative_returned'] = period_stats['returned'].cumsum()
+    period_stats['cumulative_profit'] = period_stats['profit'].cumsum()
+    period_stats['cumulative_roi'] = (period_stats['cumulative_profit'] / period_stats['cumulative_wagered']) * 100
+    period_stats['cumulative_bets'] = period_stats['bets'].cumsum()
+    period_stats['cumulative_wins'] = period_stats['wins'].cumsum()
+    period_stats['cumulative_accuracy'] = period_stats['cumulative_wins'] / period_stats['cumulative_bets']
+    
+    return period_stats
+
+
+def display_roi_over_time(roi_over_time_df, show_all=False):
+    """
+    Display ROI over time in a formatted table.
+    
+    Args:
+        roi_over_time_df: DataFrame returned by compute_roi_over_time()
+        show_all: If True, show all periods. If False, show summary (first 5, last 5)
+    """
+    if roi_over_time_df.empty:
+        print("No ROI data to display.")
+        return
+    
+    print("\n" + "="*100)
+    print("ROI OVER TIME - Cumulative Performance")
+    print("="*100)
+    
+    # Format for display
+    display_cols = ['period', 'bets', 'wins', 'accuracy', 'profit', 'roi_percent', 
+                    'cumulative_bets', 'cumulative_profit', 'cumulative_roi']
+    
+    df_display = roi_over_time_df[display_cols].copy()
+    df_display['accuracy'] = df_display['accuracy'].apply(lambda x: f"{x*100:.1f}%")
+    df_display['roi_percent'] = df_display['roi_percent'].apply(lambda x: f"{x:.2f}%")
+    df_display['cumulative_roi'] = df_display['cumulative_roi'].apply(lambda x: f"{x:.2f}%")
+    df_display['profit'] = df_display['profit'].apply(lambda x: f"${x:.2f}")
+    df_display['cumulative_profit'] = df_display['cumulative_profit'].apply(lambda x: f"${x:.2f}")
+    
+    df_display.columns = ['Period', 'Bets', 'Wins', 'Accuracy', 'Profit', 'ROI%', 
+                          'Total Bets', 'Total Profit', 'Cumulative ROI%']
+    
+    if show_all or len(df_display) <= 15:
+        print(df_display.to_string(index=False))
+    else:
+        # Show first 5 and last 5
+        print("First 5 events:")
+        print(df_display.head(5).to_string(index=False))
+        print(f"\n... ({len(df_display) - 10} events hidden) ...\n")
+        print("Last 5 events:")
+        print(df_display.tail(5).to_string(index=False))
+    
+    print("="*100)
+    
+    # Summary statistics
+    final_row = roi_over_time_df.iloc[-1]
+    print(f"\nFinal Summary:")
+    print(f"  Total Events: {len(roi_over_time_df)}")
+    print(f"  Total Bets: {int(final_row['cumulative_bets'])}")
+    print(f"  Total Profit: ${final_row['cumulative_profit']:.2f}")
+    print(f"  Final Cumulative ROI: {final_row['cumulative_roi']:.2f}%")
+    print(f"  Final Cumulative Accuracy: {final_row['cumulative_accuracy']*100:.2f}%")
+    
+    # Calculate streak info (use local calculation to avoid modifying input DataFrame)
+    profitable_events = (roi_over_time_df['profit'] > 0).sum()
+    losing_events = len(roi_over_time_df) - profitable_events
+    print(f"\n  Profitable Events: {profitable_events} ({profitable_events/len(roi_over_time_df)*100:.1f}%)")
+    print(f"  Losing Events: {losing_events} ({losing_events/len(roi_over_time_df)*100:.1f}%)")
+
+
+def plot_roi_over_time(roi_over_time_df, save_path=None):
+    """
+    Plot ROI over time.
+    
+    Args:
+        roi_over_time_df: DataFrame returned by compute_roi_over_time()
+        save_path: Optional path to save the plot
+    """
+    if roi_over_time_df.empty:
+        print("No ROI data to plot.")
+        return
+    
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    
+    # Plot 1: Cumulative ROI over time
+    ax1 = axes[0, 0]
+    ax1.plot(range(len(roi_over_time_df)), roi_over_time_df['cumulative_roi'], 'b-', linewidth=2)
+    ax1.axhline(y=0, color='r', linestyle='--', alpha=0.5)
+    ax1.set_xlabel('Event Number')
+    ax1.set_ylabel('Cumulative ROI (%)')
+    ax1.set_title('Cumulative ROI Over Time')
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Cumulative Profit over time
+    ax2 = axes[0, 1]
+    ax2.fill_between(range(len(roi_over_time_df)), roi_over_time_df['cumulative_profit'], 
+                     alpha=0.3, color='blue')
+    ax2.plot(range(len(roi_over_time_df)), roi_over_time_df['cumulative_profit'], 'b-', linewidth=2)
+    ax2.axhline(y=0, color='r', linestyle='--', alpha=0.5)
+    ax2.set_xlabel('Event Number')
+    ax2.set_ylabel('Cumulative Profit ($)')
+    ax2.set_title('Cumulative Profit Over Time')
+    ax2.grid(True, alpha=0.3)
+    
+    # Plot 3: Per-event ROI (bar chart)
+    ax3 = axes[1, 0]
+    colors = ['green' if r >= 0 else 'red' for r in roi_over_time_df['roi_percent']]
+    ax3.bar(range(len(roi_over_time_df)), roi_over_time_df['roi_percent'], color=colors, alpha=0.7)
+    ax3.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+    ax3.set_xlabel('Event Number')
+    ax3.set_ylabel('ROI (%)')
+    ax3.set_title('Per-Event ROI')
+    ax3.grid(True, alpha=0.3, axis='y')
+    
+    # Plot 4: Cumulative Accuracy over time
+    ax4 = axes[1, 1]
+    ax4.plot(range(len(roi_over_time_df)), roi_over_time_df['cumulative_accuracy'] * 100, 'g-', linewidth=2)
+    ax4.axhline(y=50, color='r', linestyle='--', alpha=0.5, label='50% baseline')
+    ax4.set_xlabel('Event Number')
+    ax4.set_ylabel('Cumulative Accuracy (%)')
+    ax4.set_title('Cumulative Accuracy Over Time')
+    ax4.grid(True, alpha=0.3)
+    ax4.legend()
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Plot saved to {save_path}")
+    
+    plt.show()
+
+
+def compare_odds_sources(odds_df):
+    """
+    Compare different odds sources (avg_odds, draftkings_odds, fanduel_odds, betmgm_odds)
+    in terms of accuracy, log loss, and brier score.
+    
+    This function evaluates how well each sportsbook's odds predict fight outcomes
+    by calculating implied probabilities from the odds.
+    
+    Note: The prediction logic uses a 0.5 implied probability threshold, which doesn't
+    account for the vig (sportsbook margin) built into odds. This is a simplification
+    that assumes the favorite (implied probability > 50%) should win.
+    
+    Args:
+        odds_df: DataFrame with fight data including various odds columns and result column
+    
+    Returns:
+        dict: Dictionary containing metrics for each odds source
+    """
+    odds_sources = ['avg_odds', 'draftkings_odds', 'fanduel_odds', 'betmgm_odds']
+    results = {}
+    
+    # Normalize dates
+    df = odds_df.copy()
+    df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+    df['result'] = pd.to_numeric(df['result'], errors='coerce')
+    
+    for odds_col in odds_sources:
+        if odds_col not in df.columns:
+            print(f"Warning: {odds_col} not found in DataFrame")
+            continue
+        
+        records = []
+        processed_fights = set()  # Track unique fights per odds source
+        
+        for _, row in df.iterrows():
+            # Skip invalid results
+            if row['result'] not in (0, 1):
+                continue
+            if pd.isna(row['DATE']):
+                continue
+            if pd.isna(row.get(odds_col)):
+                continue
+            
+            # Create unique fight key
+            fight_key = tuple(sorted([row['FIGHTER'], row['opp_FIGHTER']])) + (str(row['DATE']),)
+            
+            if fight_key in processed_fights:
+                continue
+            processed_fights.add(fight_key)
+            
+            # Get odds for this fighter
+            odds = row[odds_col]
+            decimal_odds = american_odds_to_decimal(odds)
+            if decimal_odds is None or decimal_odds <= 1:
+                continue
+            
+            # Calculate implied probability from odds
+            # Implied probability = 1 / decimal_odds
+            implied_prob = 1 / decimal_odds
+            
+            # Actual result: 1 = this fighter won, 0 = this fighter lost
+            actual_result = int(row['result'])
+            
+            # Prediction: if implied_prob > 0.5, odds favor this fighter winning
+            predicted = 1 if implied_prob > 0.5 else 0
+            
+            records.append({
+                'fighter': row['FIGHTER'],
+                'opponent': row['opp_FIGHTER'],
+                'date': row['DATE'],
+                'odds': odds,
+                'implied_prob': implied_prob,
+                'predicted': predicted,
+                'result': actual_result,
+                'correct': int(predicted == actual_result)
+            })
+        
+        if not records:
+            results[odds_col] = {
+                'total_fights': 0,
+                'accuracy': None,
+                'log_loss': None,
+                'brier_score': None
+            }
+            continue
+        
+        records_df = pd.DataFrame(records)
+        
+        # Calculate accuracy
+        accuracy = records_df['correct'].mean()
+        
+        # Calculate Log Loss
+        epsilon = 1e-10
+        implied_probs = records_df['implied_prob'].clip(epsilon, 1 - epsilon)
+        actual_results = records_df['result']
+        log_loss = -np.mean(
+            actual_results * np.log(implied_probs) + 
+            (1 - actual_results) * np.log(1 - implied_probs)
+        )
+        
+        # Calculate Brier Score
+        brier_score = np.mean((implied_probs - actual_results) ** 2)
+        
+        results[odds_col] = {
+            'total_fights': len(records),
+            'accuracy': accuracy,
+            'log_loss': log_loss,
+            'brier_score': brier_score,
+            'records': records_df
+        }
+    
+    return results
+
+
+def display_odds_comparison(comparison_results):
+    """
+    Display comparison of different odds sources in a formatted table.
+    
+    Args:
+        comparison_results: Dictionary returned by compare_odds_sources()
+    """
+    print("\n" + "="*90)
+    print("ODDS SOURCE COMPARISON - Accuracy, Log Loss, and Brier Score")
+    print("="*90)
+    print(f"\n{'Odds Source':<20} {'Fights':<10} {'Accuracy':<25} {'Log Loss':<15} {'Brier Score':<15}")
+    print("-"*90)
+    
+    for source, metrics in comparison_results.items():
+        if metrics['accuracy'] is None:
+            print(f"{source:<20} {'N/A':<10} {'N/A':<25} {'N/A':<15} {'N/A':<15}")
+        else:
+            accuracy_str = f"{metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)"
+            print(f"{source:<20} {metrics['total_fights']:<10} {accuracy_str:<25} {metrics['log_loss']:<15.4f} {metrics['brier_score']:<15.4f}")
+    
+    print("="*90)
+    
+    # Find best performers
+    valid_results = {k: v for k, v in comparison_results.items() if v['accuracy'] is not None}
+    if valid_results:
+        best_accuracy = max(valid_results.items(), key=lambda x: x[1]['accuracy'])
+        best_log_loss = min(valid_results.items(), key=lambda x: x[1]['log_loss'])
+        best_brier = min(valid_results.items(), key=lambda x: x[1]['brier_score'])
+        
+        print(f"\nBest Accuracy: {best_accuracy[0]} ({best_accuracy[1]['accuracy']*100:.2f}%)")
+        print(f"Best Log Loss: {best_log_loss[0]} ({best_log_loss[1]['log_loss']:.4f})")
+        print(f"Best Brier Score: {best_brier[0]} ({best_brier[1]['brier_score']:.4f})")
+
+
 def display_top_n_elos(df, n=10):
     #display the top n postcomp_elo values byt fighter
     # dont' display multiple instances of the same fighter
@@ -401,3 +972,35 @@ if __name__ == "__main__":
     graph_fighter_elo_history(df, fighter = 'Chris Barnett')
     most_recent_elo_df = most_recent_elo_by_fighter(df, fighter = 'Chris Barnett')
     most_recent_elo_df.to_csv('data/most_recent_elo.csv', index=False)
+    
+    # ROI Calculator - uses Elo from main.py calculations, odds from after_averaging.csv
+    print("\n" + "="*60)
+    print("RUNNING ROI CALCULATOR")
+    print("Using Elo ratings calculated above, odds from after_averaging.csv")
+    print("="*60)
+    
+    # Load the after_averaging.csv file which has the odds data only
+    odds_df = pd.read_csv('after_averaging.csv', low_memory=False)
+    odds_df['DATE'] = pd.to_datetime(odds_df['DATE'])
+    
+    # Use 'df' which already has Elo values calculated by run_basic_elo_with_mov above
+    # Merge odds from after_averaging.csv into df
+    roi_results = compute_roi_predictions(df, odds_df=odds_df)
+    display_roi_metrics(roi_results)
+    
+    # ROI Over Time Analysis - track performance by event
+    print("\n" + "="*60)
+    print("ROI OVER TIME ANALYSIS")
+    print("="*60)
+    roi_over_time = compute_roi_over_time(roi_results, group_by='event')
+    display_roi_over_time(roi_over_time, show_all=False)
+    
+    # Plot ROI over time
+    plot_roi_over_time(roi_over_time, save_path='images/roi_over_time.png')
+    
+    # Compare different odds sources (avg_odds, draftkings_odds, fanduel_odds, betmgm_odds)
+    print("\n" + "="*60)
+    print("COMPARING ODDS SOURCES")
+    print("="*60)
+    comparison_results = compare_odds_sources(odds_df)
+    display_odds_comparison(comparison_results)
