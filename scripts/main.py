@@ -1044,10 +1044,11 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
     first_fight_dates = history.groupby('fighter')['date'].min().to_dict()
     
     # Create lookup dictionary for Elo and fight details
+    # Build bidirectionally so lookup works regardless of fighter order
     elo_lookup = {}
     for _, row in df_copy.iterrows():
         key = (row['FIGHTER'], row['opp_FIGHTER'], str(row['DATE'].date()))
-        elo_lookup[key] = {
+        elo_data = {
             'precomp_elo': row.get('precomp_elo'),
             'postcomp_elo': row.get('postcomp_elo'),
             'opp_precomp_elo': row.get('opp_precomp_elo'),
@@ -1059,8 +1060,14 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
             'result': row.get('result'),
             'weight_of_fight': row.get('weight_of_fight')
         }
+        elo_lookup[key] = elo_data
+        # Add reverse key so lookup works regardless of fighter order
+        reverse_key = (row['opp_FIGHTER'], row['FIGHTER'], str(row['DATE'].date()))
+        if reverse_key not in elo_lookup:
+            elo_lookup[reverse_key] = elo_data
     
     # Build lookup for odds if odds_df is provided
+    # Build bidirectionally so lookup works regardless of fighter order
     odds_lookup = {}
     if odds_df is not None:
         odds_df_copy = odds_df.copy()
@@ -1068,13 +1075,18 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
         for _, row in odds_df_copy.iterrows():
             key = (row['FIGHTER'], row['opp_FIGHTER'], str(row['DATE'].date()))
             if key not in odds_lookup:
-                odds_lookup[key] = {
+                odds_data = {
                     'event_name': row.get('EVENT', 'Unknown Event'),
                     'avg_odds': row.get('avg_odds'),
                     'draftkings_odds': row.get('draftkings_odds'),
                     'fanduel_odds': row.get('fanduel_odds'),
                     'betmgm_odds': row.get('betmgm_odds')
                 }
+                odds_lookup[key] = odds_data
+                # Add reverse key so lookup works regardless of fighter order
+                reverse_key = (row['opp_FIGHTER'], row['FIGHTER'], str(row['DATE'].date()))
+                if reverse_key not in odds_lookup:
+                    odds_lookup[reverse_key] = odds_data
     
     # Build set of bet fight keys for quick lookup
     bet_fight_keys = set()
