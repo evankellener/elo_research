@@ -386,7 +386,7 @@ class TestAnalyzeRandomEvents(unittest.TestCase):
         """Test that each event has all required keys"""
         result = analyze_random_events(self.df, self.roi_results, n_events=1, random_seed=42)
         
-        required_keys = ['event_date', 'event_name', 'bets', 'event_roi', 
+        required_keys = ['event_date', 'event_name', 'bets', 'other_fights', 'event_roi', 
                         'win_count', 'loss_count', 'total_wagered', 'total_payout', 'total_profit']
         
         if result:
@@ -426,6 +426,27 @@ class TestAnalyzeRandomEvents(unittest.TestCase):
             # Verify ROI calculation: (profit / wagered) * 100
             expected_roi = (event['total_profit'] / event['total_wagered']) * 100 if event['total_wagered'] > 0 else 0
             self.assertAlmostEqual(event['event_roi'], expected_roi, places=2)
+    
+    def test_other_fights_is_list(self):
+        """Test that other_fights is always a list"""
+        result = analyze_random_events(self.df, self.roi_results, n_events=3, random_seed=42)
+        
+        for event in result:
+            self.assertIn('other_fights', event)
+            self.assertIsInstance(event['other_fights'], list)
+    
+    def test_other_fights_have_required_keys(self):
+        """Test that each fight in other_fights has required keys"""
+        result = analyze_random_events(self.df, self.roi_results, n_events=3, random_seed=42)
+        
+        required_fight_keys = ['fighter', 'opponent', 'winner', 'loser', 'fighter_won',
+                               'fighter_pre_elo', 'opp_pre_elo', 'elo_diff',
+                               'method_of_victory', 'bet_placed', 'reason_no_bet']
+        
+        for event in result:
+            for fight in event.get('other_fights', []):
+                for key in required_fight_keys:
+                    self.assertIn(key, fight)
 
 
 class TestDisplayDetailedEventAnalysis(unittest.TestCase):
@@ -464,6 +485,71 @@ class TestDisplayDetailedEventAnalysis(unittest.TestCase):
                     'draftkings_odds': -190,
                     'fanduel_odds': -210,
                     'betmgm_odds': -195
+                }
+            ],
+            'other_fights': [],
+            'event_roi': 50.0,
+            'win_count': 1,
+            'loss_count': 0,
+            'total_wagered': 1.0,
+            'total_payout': 1.5,
+            'total_profit': 0.5
+        }
+        # Should not raise an exception
+        display_detailed_event_analysis([event])
+    
+    def test_handles_event_with_other_fights(self):
+        """Test that function handles event with both bets and other_fights"""
+        event = {
+            'event_date': '2024-01-01',
+            'event_name': 'Test Event',
+            'bets': [
+                {
+                    'bet_on': 'Fighter A',
+                    'bet_against': 'Fighter B',
+                    'bet_on_pre_elo': 1600,
+                    'bet_on_post_elo': 1620,
+                    'bet_on_elo_change': 20,
+                    'bet_against_pre_elo': 1500,
+                    'bet_against_post_elo': 1480,
+                    'bet_against_elo_change': -20,
+                    'elo_diff': 100,
+                    'avg_odds_american': -200,
+                    'decimal_odds': 1.5,
+                    'bet_amount': 1.0,
+                    'payout': 1.5,
+                    'profit': 0.5,
+                    'bet_won': True,
+                    'expected_prob': 0.6,
+                    'method_of_victory': 'KO/TKO',
+                    'round': 2,
+                    'draftkings_odds': -190,
+                    'fanduel_odds': -210,
+                    'betmgm_odds': -195
+                }
+            ],
+            'other_fights': [
+                {
+                    'fighter': 'Fighter C',
+                    'opponent': 'Fighter D',
+                    'winner': 'Fighter C',
+                    'loser': 'Fighter D',
+                    'fighter_won': True,
+                    'fighter_pre_elo': 1550,
+                    'fighter_post_elo': 1580,
+                    'fighter_elo_change': 30,
+                    'opp_pre_elo': 1450,
+                    'opp_post_elo': 1420,
+                    'opp_elo_change': -30,
+                    'elo_diff': 100,
+                    'avg_odds_american': None,
+                    'method_of_victory': 'Unanimous Decision',
+                    'round': 3,
+                    'draftkings_odds': None,
+                    'fanduel_odds': None,
+                    'betmgm_odds': None,
+                    'bet_placed': False,
+                    'reason_no_bet': 'No odds available'
                 }
             ],
             'event_roi': 50.0,

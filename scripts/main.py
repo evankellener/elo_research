@@ -989,10 +989,16 @@ def _normalize_datetime(dt_series):
 
 def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed=None):
     """
-    Randomly select and analyze n unique events from the ROI betting records.
+    Randomly select and analyze n unique events, showing ALL valid fights from each event.
     
     This function provides in-depth fight-by-fight analysis for randomly selected events,
-    including Elo ratings, betting odds, outcomes, and profitability metrics.
+    including both fights that were bet on (from ROI records) and other valid fights that
+    occurred on the same date.
+    
+    A valid fight is one where:
+    - Both fighters have at least one prior fight (history)
+    - The fight result is valid (0 or 1, no draws)
+    - Both fighters have Elo ratings
     
     Args:
         df: DataFrame with fight data including precomp_elo, postcomp_elo, etc.
@@ -1005,8 +1011,9 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
         List of dictionaries, each containing detailed analysis for one event:
         - event_date: Date of the event
         - event_name: Name of the event (if available)
-        - bets: List of bet details for each bet in the event
-        - event_roi: ROI for this specific event
+        - bets: List of bet details for fights that were bet on
+        - other_fights: List of other valid fights that weren't bet on
+        - event_roi: ROI for this specific event (from bets only)
         - win_count: Number of winning bets
         - loss_count: Number of losing bets
         - total_profit: Net profit for the event
@@ -1032,6 +1039,10 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
     df_copy = df.copy()
     df_copy['DATE'] = _normalize_datetime(df_copy['DATE'])
     
+    # Build fighter history for prior fight check
+    history = build_fighter_history(df_copy)
+    first_fight_dates = history.groupby('fighter')['date'].min().to_dict()
+    
     # Create lookup dictionary for Elo and fight details
     elo_lookup = {}
     for _, row in df_copy.iterrows():
@@ -1045,7 +1056,8 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
             'method_of_victory': get_method_of_victory(row),
             'round': row.get('round'),
             'time_format': row.get('time_format'),
-            'result': row.get('result')
+            'result': row.get('result'),
+            'weight_of_fight': row.get('weight_of_fight')
         }
     
     # Build lookup for odds if odds_df is provided
@@ -1058,10 +1070,19 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
             if key not in odds_lookup:
                 odds_lookup[key] = {
                     'event_name': row.get('EVENT', 'Unknown Event'),
+                    'avg_odds': row.get('avg_odds'),
                     'draftkings_odds': row.get('draftkings_odds'),
                     'fanduel_odds': row.get('fanduel_odds'),
                     'betmgm_odds': row.get('betmgm_odds')
                 }
+    
+    # Build set of bet fight keys for quick lookup
+    bet_fight_keys = set()
+    for _, bet in records_df.iterrows():
+        bet_date_str = str(pd.to_datetime(bet['date']).date())
+        # Add both orderings to catch the fight regardless of row perspective
+        bet_fight_keys.add((bet['bet_on'], bet['bet_against'], bet_date_str))
+        bet_fight_keys.add((bet['bet_against'], bet['bet_on'], bet_date_str))
     
     event_analyses = []
     
@@ -1069,18 +1090,14 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
         event_date_str = str(event_date)
         event_bets = records_df[records_df['date'].dt.date == event_date]
         
-        if event_bets.empty:
-            continue
+        # Get all fights from df on this date
+        event_fights_df = df_copy[df_copy['DATE'].dt.date == event_date]
         
-        # Determine event name from odds_lookup or elo_lookup
+        # Determine event name from the df or odds_lookup
         event_name = 'Unknown Event'
-        for _, bet in event_bets.iterrows():
-            key = (bet['bet_on'], bet['bet_against'], event_date_str)
-            if key in odds_lookup and odds_lookup[key].get('event_name'):
-                event_name = odds_lookup[key]['event_name']
-                break
-            if key in elo_lookup and elo_lookup[key].get('event_name'):
-                event_name = elo_lookup[key]['event_name']
+        for _, row in event_fights_df.iterrows():
+            if row.get('EVENT') and str(row.get('EVENT')) != 'nan':
+                event_name = row['EVENT']
                 break
         
         bets_list = []
@@ -1136,13 +1153,113 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
                 'round': elo_data.get('round'),
                 'draftkings_odds': odds_data.get('draftkings_odds'),
                 'fanduel_odds': odds_data.get('fanduel_odds'),
-                'betmgm_odds': odds_data.get('betmgm_odds')
+                'betmgm_odds': odds_data.get('betmgm_odds'),
+                'bet_placed': True
             }
             bets_list.append(bet_details)
         
-        # Calculate event-level metrics
-        total_wagered = sum(b['bet_amount'] for b in bets_list)
-        total_payout = sum(b['payout'] for b in bets_list)
+        # Now find other valid fights on this date that weren't bet on
+        other_fights_list = []
+        processed_fight_keys = set()  # Track processed fights to avoid duplicates
+        
+        for _, row in event_fights_df.iterrows():
+            fighter = row['FIGHTER']
+            opponent = row['opp_FIGHTER']
+            fight_key = tuple(sorted([fighter, opponent]))
+            
+            # Skip if already processed (avoid duplicate from both perspectives)
+            if fight_key in processed_fight_keys:
+                continue
+            processed_fight_keys.add(fight_key)
+            
+            # Skip if this fight was already bet on
+            key1 = (fighter, opponent, event_date_str)
+            key2 = (opponent, fighter, event_date_str)
+            if key1 in bet_fight_keys or key2 in bet_fight_keys:
+                continue
+            
+            # Apply filtering criteria:
+            # 1. Valid result (0 or 1, no draws)
+            if row['result'] not in (0, 1):
+                continue
+            
+            # 2. Both fighters have prior fight history
+            if not has_prior_history(first_fight_dates, fighter, row['DATE']):
+                continue
+            if not has_prior_history(first_fight_dates, opponent, row['DATE']):
+                continue
+            
+            # 3. Both fighters have Elo ratings
+            if pd.isna(row.get('precomp_elo')) or pd.isna(row.get('opp_precomp_elo')):
+                continue
+            
+            # Get fight details
+            elo_data = elo_lookup.get(key1, {})
+            odds_data = odds_lookup.get(key1, odds_lookup.get(key2, {}))
+            
+            # Determine winner based on result and Elo information
+            fighter_won = (row['result'] == 1)
+            winner = fighter if fighter_won else opponent
+            loser = opponent if fighter_won else fighter
+            
+            # Calculate Elo change for both fighters
+            fighter_pre_elo = row.get('precomp_elo')
+            fighter_post_elo = row.get('postcomp_elo')
+            opp_pre_elo = row.get('opp_precomp_elo')
+            opp_post_elo = row.get('opp_postcomp_elo')
+            
+            fighter_elo_change = None
+            opp_elo_change = None
+            if fighter_pre_elo is not None and fighter_post_elo is not None:
+                fighter_elo_change = fighter_post_elo - fighter_pre_elo
+            if opp_pre_elo is not None and opp_post_elo is not None:
+                opp_elo_change = opp_post_elo - opp_pre_elo
+            
+            # Calculate Elo diff (higher Elo - lower Elo)
+            elo_diff = None
+            if fighter_pre_elo is not None and opp_pre_elo is not None:
+                elo_diff = abs(fighter_pre_elo - opp_pre_elo)
+            
+            # Determine reason why bet wasn't placed
+            # At this point, the fight passed all filtering criteria (valid result, prior history, Elo)
+            # The reason it wasn't bet on is either:
+            # 1. No odds available
+            # 2. Equal Elo ratings (can't determine which fighter to bet on)
+            # 3. Other filtering in compute_roi_predictions
+            if not odds_data.get('avg_odds'):
+                reason_no_bet = 'No odds available'
+            elif fighter_pre_elo == opp_pre_elo:
+                reason_no_bet = 'Equal Elo ratings'
+            else:
+                reason_no_bet = 'Odds data mismatch'
+            
+            fight_details = {
+                'fighter': fighter,
+                'opponent': opponent,
+                'winner': winner,
+                'loser': loser,
+                'fighter_won': fighter_won,
+                'fighter_pre_elo': fighter_pre_elo,
+                'fighter_post_elo': fighter_post_elo,
+                'fighter_elo_change': fighter_elo_change,
+                'opp_pre_elo': opp_pre_elo,
+                'opp_post_elo': opp_post_elo,
+                'opp_elo_change': opp_elo_change,
+                'elo_diff': elo_diff,
+                'avg_odds_american': odds_data.get('avg_odds'),
+                'method_of_victory': elo_data.get('method_of_victory', get_method_of_victory(row)),
+                'round': row.get('round'),
+                'draftkings_odds': odds_data.get('draftkings_odds'),
+                'fanduel_odds': odds_data.get('fanduel_odds'),
+                'betmgm_odds': odds_data.get('betmgm_odds'),
+                'bet_placed': False,
+                'reason_no_bet': reason_no_bet
+            }
+            other_fights_list.append(fight_details)
+        
+        # Calculate event-level metrics (from bets only)
+        total_wagered = sum(b['bet_amount'] for b in bets_list) if bets_list else 0
+        total_payout = sum(b['payout'] for b in bets_list) if bets_list else 0
         total_profit = total_payout - total_wagered
         event_roi = (total_profit / total_wagered) * 100 if total_wagered > 0 else 0
         win_count = sum(1 for b in bets_list if b['bet_won'])
@@ -1152,6 +1269,7 @@ def analyze_random_events(df, roi_results, odds_df=None, n_events=5, random_seed
             'event_date': event_date,
             'event_name': event_name,
             'bets': bets_list,
+            'other_fights': other_fights_list,
             'event_roi': event_roi,
             'win_count': win_count,
             'loss_count': loss_count,
@@ -1170,6 +1288,7 @@ def display_detailed_event_analysis(event_analyses):
     Formats and prints:
     - Well-structured event headers with date and event name
     - Tabular display of all bets with Elo matchups, odds, and outcomes
+    - Other valid fights that weren't bet on
     - Fighter Elo progression visualization
     - Event profitability summary
     - Individual bet profitability breakdown
@@ -1192,64 +1311,116 @@ def display_detailed_event_analysis(event_analyses):
         print("-"*100)
         print(f"Date: {event['event_date']}")
         print(f"Event: {event['event_name']}")
-        print(f"Total Bets: {len(event['bets'])}")
-        print(f"Record: {event['win_count']}W - {event['loss_count']}L")
         
-        # Event Summary
-        profit_str = f"${event['total_profit']:+.2f}"
-        roi_str = f"{event['event_roi']:+.2f}%"
-        status = "PROFIT" if event['total_profit'] > 0 else ("LOSS" if event['total_profit'] < 0 else "BREAK EVEN")
-        print(f"Result: {status} | Wagered: ${event['total_wagered']:.2f} | "
-              f"Returned: ${event['total_payout']:.2f} | Profit: {profit_str} | ROI: {roi_str}")
+        # Get other_fights count safely (backwards compatible)
+        other_fights = event.get('other_fights', [])
+        total_valid_fights = len(event['bets']) + len(other_fights)
         
-        # Bet Details Table Header
-        print("\n  {:<25} {:<25} {:>10} {:>10} {:>12} {:>10} {:>10} {:>10}".format(
-            "Bet On", "Bet Against", "Pre-Elo", "Opp Elo", "Odds", "Bet", "Payout", "Result"
-        ))
-        print("  " + "-"*96)
+        print(f"Total Valid Fights: {total_valid_fights} ({len(event['bets'])} bets placed, {len(other_fights)} not bet on)")
+        print(f"Betting Record: {event['win_count']}W - {event['loss_count']}L")
         
-        # Individual Bet Details
-        for bet in event['bets']:
-            # Format Elo values
-            pre_elo_str = f"{bet['bet_on_pre_elo']:.0f}" if bet['bet_on_pre_elo'] is not None else "N/A"
-            opp_elo_str = f"{bet['bet_against_pre_elo']:.0f}" if bet['bet_against_pre_elo'] is not None else "N/A"
-            
-            # Format odds (American) - convert to float if it's a string
-            if pd.notna(bet['avg_odds_american']):
-                try:
-                    odds_value = float(bet['avg_odds_american'])
-                    odds_str = f"{odds_value:+.0f}"
-                except (ValueError, TypeError):
-                    odds_str = str(bet['avg_odds_american'])
-            else:
-                odds_str = "N/A"
-            
-            # Result indicator
-            result_str = "WIN" if bet['bet_won'] else "LOSS"
-            payout_str = f"${bet['payout']:.2f}"
-            
-            # Truncate fighter names if too long
-            bet_on_name = bet['bet_on'][:23] + ".." if len(bet['bet_on']) > 25 else bet['bet_on']
-            bet_against_name = bet['bet_against'][:23] + ".." if len(bet['bet_against']) > 25 else bet['bet_against']
-            
-            print("  {:<25} {:<25} {:>10} {:>10} {:>12} {:>10} {:>10} {:>10}".format(
-                bet_on_name,
-                bet_against_name,
-                pre_elo_str,
-                opp_elo_str,
-                odds_str,
-                f"${bet['bet_amount']:.2f}",
-                payout_str,
-                result_str
+        # Event Summary (betting results)
+        if event['total_wagered'] > 0:
+            profit_str = f"${event['total_profit']:+.2f}"
+            roi_str = f"{event['event_roi']:+.2f}%"
+            status = "PROFIT" if event['total_profit'] > 0 else ("LOSS" if event['total_profit'] < 0 else "BREAK EVEN")
+            print(f"Betting Result: {status} | Wagered: ${event['total_wagered']:.2f} | "
+                  f"Returned: ${event['total_payout']:.2f} | Profit: {profit_str} | ROI: {roi_str}")
+        
+        # Section 1: Bets Placed
+        if event['bets']:
+            print("\n  === BETS PLACED ({} fights) ===".format(len(event['bets'])))
+            print("\n  {:<25} {:<25} {:>10} {:>10} {:>12} {:>10} {:>10} {:>10}".format(
+                "Bet On", "Bet Against", "Pre-Elo", "Opp Elo", "Odds", "Bet", "Payout", "Result"
             ))
+            print("  " + "-"*96)
+            
+            # Individual Bet Details
+            for bet in event['bets']:
+                # Format Elo values
+                pre_elo_str = f"{bet['bet_on_pre_elo']:.0f}" if bet['bet_on_pre_elo'] is not None else "N/A"
+                opp_elo_str = f"{bet['bet_against_pre_elo']:.0f}" if bet['bet_against_pre_elo'] is not None else "N/A"
+                
+                # Format odds (American) - convert to float if it's a string
+                if pd.notna(bet['avg_odds_american']):
+                    try:
+                        odds_value = float(bet['avg_odds_american'])
+                        odds_str = f"{odds_value:+.0f}"
+                    except (ValueError, TypeError):
+                        odds_str = str(bet['avg_odds_american'])
+                else:
+                    odds_str = "N/A"
+                
+                # Result indicator
+                result_str = "WIN" if bet['bet_won'] else "LOSS"
+                payout_str = f"${bet['payout']:.2f}"
+                
+                # Truncate fighter names if too long
+                bet_on_name = bet['bet_on'][:23] + ".." if len(bet['bet_on']) > 25 else bet['bet_on']
+                bet_against_name = bet['bet_against'][:23] + ".." if len(bet['bet_against']) > 25 else bet['bet_against']
+                
+                print("  {:<25} {:<25} {:>10} {:>10} {:>12} {:>10} {:>10} {:>10}".format(
+                    bet_on_name,
+                    bet_against_name,
+                    pre_elo_str,
+                    opp_elo_str,
+                    odds_str,
+                    f"${bet['bet_amount']:.2f}",
+                    payout_str,
+                    result_str
+                ))
+        
+        # Section 2: Other Valid Fights (not bet on)
+        if other_fights:
+            print("\n  === OTHER VALID FIGHTS ({} fights - not bet on) ===".format(len(other_fights)))
+            print("\n  {:<25} {:<25} {:>10} {:>10} {:>12} {:>10} {:>12}".format(
+                "Fighter", "Opponent", "Pre-Elo", "Opp Elo", "Odds", "Winner", "Why No Bet"
+            ))
+            print("  " + "-"*96)
+            
+            for fight in other_fights:
+                # Format Elo values
+                fighter_elo_str = f"{fight['fighter_pre_elo']:.0f}" if fight['fighter_pre_elo'] is not None else "N/A"
+                opp_elo_str = f"{fight['opp_pre_elo']:.0f}" if fight['opp_pre_elo'] is not None else "N/A"
+                
+                # Format odds (American)
+                odds_str = f"{fight['avg_odds_american']:+.0f}" if pd.notna(fight.get('avg_odds_american')) else "N/A"
+                
+                # Winner indicator
+                winner_str = fight['winner'][:10] if len(fight['winner']) > 10 else fight['winner']
+                
+                # Truncate fighter names if too long
+                fighter_name = fight['fighter'][:23] + ".." if len(fight['fighter']) > 25 else fight['fighter']
+                opp_name = fight['opponent'][:23] + ".." if len(fight['opponent']) > 25 else fight['opponent']
+                
+                # Reason for no bet
+                reason = fight.get('reason_no_bet', 'Unknown')[:12]
+                
+                print("  {:<25} {:<25} {:>10} {:>10} {:>12} {:>10} {:>12}".format(
+                    fighter_name,
+                    opp_name,
+                    fighter_elo_str,
+                    opp_elo_str,
+                    odds_str,
+                    winner_str,
+                    reason
+                ))
         
         # Elo Change Summary
-        print("\n  Elo Changes:")
+        print("\n  Elo Changes (Bets):")
         for bet in event['bets']:
-            if bet['bet_on_elo_change'] is not None:
+            if bet.get('bet_on_elo_change') is not None:
                 change_str = f"{bet['bet_on_elo_change']:+.1f}"
                 win_indicator = "(Won)" if bet['bet_won'] else "(Lost)"
                 print(f"    {bet['bet_on']}: {change_str} {win_indicator}")
+        
+        if other_fights:
+            print("\n  Elo Changes (Other Fights):")
+            for fight in other_fights:
+                if fight.get('fighter_elo_change') is not None:
+                    change_str = f"{fight['fighter_elo_change']:+.1f}"
+                    win_indicator = "(Won)" if fight['fighter_won'] else "(Lost)"
+                    print(f"    {fight['fighter']}: {change_str} {win_indicator}")
         
         # Additional fight details
         print("\n  Fight Details:")
@@ -1259,7 +1430,14 @@ def display_detailed_event_analysis(event_analyses):
             winner = bet['bet_on'] if bet['bet_won'] else bet['bet_against']
             
             round_str = f"Round {round_num}" if round_num else ""
-            print(f"    {bet['bet_on']} vs {bet['bet_against']}: Winner - {winner} ({mov}) {round_str}")
+            print(f"    [BET] {bet['bet_on']} vs {bet['bet_against']}: Winner - {winner} ({mov}) {round_str}")
+        
+        for fight in other_fights:
+            mov = fight.get('method_of_victory', 'Unknown')
+            round_num = fight.get('round')
+            
+            round_str = f"Round {round_num}" if round_num else ""
+            print(f"    [---] {fight['fighter']} vs {fight['opponent']}: Winner - {fight['winner']} ({mov}) {round_str}")
     
     # Overall Summary
     print("\n" + "="*100)
@@ -1267,6 +1445,7 @@ def display_detailed_event_analysis(event_analyses):
     print("="*100)
     
     total_bets = sum(len(e['bets']) for e in event_analyses)
+    total_other_fights = sum(len(e.get('other_fights', [])) for e in event_analyses)
     total_wins = sum(e['win_count'] for e in event_analyses)
     total_losses = sum(e['loss_count'] for e in event_analyses)
     total_wagered = sum(e['total_wagered'] for e in event_analyses)
@@ -1276,9 +1455,9 @@ def display_detailed_event_analysis(event_analyses):
     profitable_events = sum(1 for e in event_analyses if e['total_profit'] > 0)
     
     print(f"Events Analyzed: {len(event_analyses)}")
+    print(f"Total Valid Fights: {total_bets + total_other_fights} ({total_bets} bets placed, {total_other_fights} not bet on)")
     print(f"Profitable Events: {profitable_events} ({profitable_events/len(event_analyses)*100:.1f}%)")
-    print(f"Total Bets: {total_bets}")
-    print(f"Overall Record: {total_wins}W - {total_losses}L ({total_wins/total_bets*100:.1f}% win rate)")
+    print(f"Betting Record: {total_wins}W - {total_losses}L ({total_wins/total_bets*100:.1f}% win rate)" if total_bets > 0 else "Betting Record: No bets")
     print(f"Total Wagered: ${total_wagered:.2f}")
     print(f"Total Profit/Loss: ${total_profit:+.2f}")
     print(f"Overall ROI: {overall_roi:+.2f}%")
