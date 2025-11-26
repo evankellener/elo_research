@@ -1504,14 +1504,7 @@ if __name__ == "__main__":
     
     df = pd.read_csv("data/interleaved_cleaned.csv", low_memory=False)
     test_df = pd.read_csv("data/past3_events.csv", low_memory=False)
-    odds_df = pd.read_csv("data/past3_events.csv", low_memory=False)
-    
-    # Normalize column names: rename lowercase to uppercase for compatibility
-    odds_df = odds_df.rename(columns={
-        'date': 'DATE',
-        'fighter': 'FIGHTER', 
-        'opp_fighter': 'opp_FIGHTER'
-    })
+    odds_df = pd.read_csv("after_averaging.csv", low_memory=False)
 
     df["result"] = pd.to_numeric(df["result"], errors="coerce")
     df["DATE"] = pd.to_datetime(df["DATE"]).dt.tz_localize(None)
@@ -1595,11 +1588,20 @@ if __name__ == "__main__":
         df_trained = run_basic_elo(df_train_all, k=best_k, mov_params=mov_params)
 
         # OOS ROI evaluation on past 3 events
+        # Use test_df as the odds source for OOS evaluation (it has avg_odds column)
+        test_odds_df = test_df.copy()
+        test_odds_df = test_odds_df.rename(columns={
+            'date': 'DATE',
+            'fighter': 'FIGHTER',
+            'opp_fighter': 'opp_FIGHTER'
+        })
+        test_odds_df["DATE"] = pd.to_datetime(test_odds_df["DATE"]).dt.tz_localize(None)
+        
         print("\n=== OOS ROI evaluation on data/past3_events.csv ===")
         oos_roi_results = calculate_oos_roi(
             df_trained,
             test_df,
-            odds_df,
+            test_odds_df,
             verbose=True,
         )
         print(f"\nOOS Results:")
