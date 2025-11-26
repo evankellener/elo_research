@@ -232,6 +232,68 @@ class TestGASearchParamsROI(unittest.TestCase):
             self.assertIn('generation', gen_result)
             self.assertIn('best_fitness', gen_result)
             self.assertIn('best_params', gen_result)
+    
+    @unittest.skipIf(not os.path.exists(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+        'data', 'interleaved_cleaned.csv')), 
+        "interleaved_cleaned.csv not found")
+    def test_lookback_days_parameter(self):
+        """Test that lookback_days parameter is properly accepted and used"""
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        # Run with lookback_days=365 (past year)
+        best_params, best_roi = ga_search_params_roi(
+            df,
+            odds_df,
+            population_size=3,
+            generations=1,
+            lookback_days=365,
+            seed=42,
+            verbose=False
+        )
+        
+        # Check return values
+        self.assertIsInstance(best_params, dict)
+        self.assertIsInstance(best_roi, float)
+    
+    @unittest.skipIf(not os.path.exists(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+        'data', 'interleaved_cleaned.csv')), 
+        "interleaved_cleaned.csv not found")
+    def test_lookback_days_zero_uses_all_data(self):
+        """Test that lookback_days=0 uses all available data"""
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        # Run with lookback_days=0 (all data)
+        best_params, best_roi = ga_search_params_roi(
+            df,
+            odds_df,
+            population_size=3,
+            generations=1,
+            lookback_days=0,
+            seed=42,
+            verbose=False
+        )
+        
+        # Check return values
+        self.assertIsInstance(best_params, dict)
+        self.assertIsInstance(best_roi, float)
 
 
 class TestCalculateOOSROI(unittest.TestCase):
@@ -336,6 +398,8 @@ class TestMainBlockModeRouting(unittest.TestCase):
         self.parser = argparse.ArgumentParser(description="Genetic Algorithm for Elo Parameter Optimization")
         self.parser.add_argument("--mode", choices=["accuracy", "roi"], default="roi",
                                  help="Optimization mode: 'accuracy' (original) or 'roi' (ROI-based)")
+        self.parser.add_argument("--lookback-days", type=int, default=365, dest="lookback_days",
+                                 help="Number of days to look back for ROI optimization (default: 365)")
     
     def test_argparse_mode_default_is_roi(self):
         """Test that the default mode is 'roi'"""
@@ -361,6 +425,32 @@ class TestMainBlockModeRouting(unittest.TestCase):
         """Test that the mode condition 'args.mode == \"roi\"' correctly fails for accuracy mode"""
         args = self.parser.parse_args(["--mode", "accuracy"])
         self.assertFalse(args.mode == "roi", "Condition 'args.mode == \"roi\"' should be False for accuracy mode")
+    
+    def test_lookback_days_default_is_365(self):
+        """Test that the default lookback-days is 365"""
+        args = self.parser.parse_args([])
+        self.assertEqual(args.lookback_days, 365, "Default lookback_days should be 365")
+    
+    def test_lookback_days_explicit_180(self):
+        """Test that --lookback-days 180 is correctly parsed"""
+        args = self.parser.parse_args(["--lookback-days", "180"])
+        self.assertEqual(args.lookback_days, 180)
+    
+    def test_lookback_days_explicit_90(self):
+        """Test that --lookback-days 90 is correctly parsed"""
+        args = self.parser.parse_args(["--lookback-days", "90"])
+        self.assertEqual(args.lookback_days, 90)
+    
+    def test_lookback_days_explicit_0(self):
+        """Test that --lookback-days 0 disables lookback (uses all data)"""
+        args = self.parser.parse_args(["--lookback-days", "0"])
+        self.assertEqual(args.lookback_days, 0)
+    
+    def test_lookback_days_combined_with_mode(self):
+        """Test that --mode roi and --lookback-days can be used together"""
+        args = self.parser.parse_args(["--mode", "roi", "--lookback-days", "180"])
+        self.assertEqual(args.mode, "roi")
+        self.assertEqual(args.lookback_days, 180)
 
 
 class TestComputeExtendedROIMetrics(unittest.TestCase):
