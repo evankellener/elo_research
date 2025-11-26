@@ -1513,12 +1513,12 @@ if __name__ == "__main__":
     df = df.sort_values('DATE').reset_index(drop=True)
     # Use custom weights from best GA run
     df = run_basic_elo_with_mov(df, 
-                                k=237.43990534337982,
-                                w_ko=1.055465364523305,
-                                w_sub=1.7461659394019622,
-                                w_udec=1.0084238164539632,
-                                w_sdec=0.6050612748940885,
-                                w_mdec=0.8479369152159737)
+                                k=135.5024295855922,
+                                w_ko=1.304905948911245,
+                                w_sub=2.0,
+                                w_udec=0.8150291233970635,
+                                w_sdec= 0.6277860597403592,
+                                w_mdec=1.0229206801627735)
     print(display_top_n_elos(df, n = 100))
     print(most_recent_elo(df, n = 100))
     print(elo_accuracy(df))
