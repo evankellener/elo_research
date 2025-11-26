@@ -25,7 +25,7 @@ from elo_utils import add_bout_counts
 # Module-level path constants for skipIf decorators
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DATA_FILE = os.path.join(_PROJECT_ROOT, 'data', 'interleaved_cleaned.csv')
-_ODDS_FILE = os.path.join(_PROJECT_ROOT, 'after_averaging.csv')
+_ODDS_FILE = os.path.join(_PROJECT_ROOT, 'data', 'past3_events.csv')
 
 
 class TestAmericanOddsToDecimal(unittest.TestCase):
@@ -170,6 +170,7 @@ class TestGASearchParamsROI(unittest.TestCase):
         """Test that GA returns best params and ROI value"""
         df = pd.read_csv(self.data_file, low_memory=False)
         odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
         
         df['result'] = pd.to_numeric(df['result'], errors='coerce')
         df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
@@ -203,6 +204,7 @@ class TestGASearchParamsROI(unittest.TestCase):
         """Test that return_all_results option returns generation summaries"""
         df = pd.read_csv(self.data_file, low_memory=False)
         odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
         
         df['result'] = pd.to_numeric(df['result'], errors='coerce')
         df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
@@ -236,6 +238,7 @@ class TestGASearchParamsROI(unittest.TestCase):
         """Test that lookback_days parameter is properly accepted and used"""
         df = pd.read_csv(self.data_file, low_memory=False)
         odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
         
         df['result'] = pd.to_numeric(df['result'], errors='coerce')
         df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
@@ -264,6 +267,7 @@ class TestGASearchParamsROI(unittest.TestCase):
         """Test that lookback_days=0 uses all available data"""
         df = pd.read_csv(self.data_file, low_memory=False)
         odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
         
         df['result'] = pd.to_numeric(df['result'], errors='coerce')
         df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
@@ -590,6 +594,7 @@ class TestEvaluateParamsROIExtended(unittest.TestCase):
         """Test that return_extended=True returns a dictionary with all metrics"""
         df = pd.read_csv(self.data_file, low_memory=False)
         odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
         
         df['result'] = pd.to_numeric(df['result'], errors='coerce')
         df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
@@ -622,6 +627,7 @@ class TestEvaluateParamsROIExtended(unittest.TestCase):
         """Test that return_extended=False returns a float"""
         df = pd.read_csv(self.data_file, low_memory=False)
         odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
         
         df['result'] = pd.to_numeric(df['result'], errors='coerce')
         df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
@@ -659,6 +665,7 @@ class TestGASearchParamsROIExtendedResults(unittest.TestCase):
         """Test that all_results contains extended metrics for each generation"""
         df = pd.read_csv(self.data_file, low_memory=False)
         odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
         
         df['result'] = pd.to_numeric(df['result'], errors='coerce')
         df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
@@ -691,6 +698,7 @@ class TestGASearchParamsROIExtendedResults(unittest.TestCase):
         """Test that fitness_weights parameter works"""
         df = pd.read_csv(self.data_file, low_memory=False)
         odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
         
         df['result'] = pd.to_numeric(df['result'], errors='coerce')
         df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
