@@ -1491,6 +1491,8 @@ if __name__ == "__main__":
                         help="Optimization mode: 'accuracy' (original) or 'roi' (ROI-based)")
     parser.add_argument("--population", type=int, default=30, help="Population size")
     parser.add_argument("--generations", type=int, default=30, help="Number of generations")
+    parser.add_argument("--lookback-days", type=int, default=365,
+                        help="Number of days to look back for ROI optimization (default: 365)")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     args = parser.parse_args()
     
@@ -1520,22 +1522,23 @@ if __name__ == "__main__":
         print("\n" + "="*60)
         print("ROI-BASED GENETIC ALGORITHM OPTIMIZATION")
         print("="*60)
-        print("Optimizing parameters to maximize ROI on ALL fights with available odds")
+        print(f"Optimizing ROI for past {args.lookback_days} days of fights")
         print("Calling ga_search_params_roi()...")
         
-        # Run ROI-based GA search (uses all fights with odds by default)
+        # Run ROI-based GA search
         best_params, best_roi = ga_search_params_roi(
             df,
             odds_df,
             test_df=test_df,
             population_size=args.population,
             generations=args.generations,
+            lookback_days=args.lookback_days,
             seed=args.seed,
         )
 
         print("\n=== GA best params (ROI-optimized) ===")
         print(best_params)
-        print(f"Best ROI on all fights with odds: {best_roi:.2f}%")
+        print(f"Best ROI (lookback {args.lookback_days} days): {best_roi:.2f}%")
 
         # Train final Elo with best params on ALL DATA before test dates
         mov_params = {
