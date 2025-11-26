@@ -22,6 +22,11 @@ from full_genetic_with_k_denom_mov import (
 )
 from elo_utils import add_bout_counts
 
+# Module-level path constants for skipIf decorators
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DATA_FILE = os.path.join(_PROJECT_ROOT, 'data', 'interleaved_cleaned.csv')
+_ODDS_FILE = os.path.join(_PROJECT_ROOT, 'after_averaging.csv')
+
 
 class TestAmericanOddsToDecimal(unittest.TestCase):
     """Tests for american_odds_to_decimal function in GA module"""
@@ -156,15 +161,11 @@ class TestGASearchParamsROI(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up class-level resources"""
-        # Get path to project root
-        cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        cls.data_file = os.path.join(cls.project_root, 'data', 'interleaved_cleaned.csv')
-        cls.odds_file = os.path.join(cls.project_root, 'after_averaging.csv')
+        cls.project_root = _PROJECT_ROOT
+        cls.data_file = _DATA_FILE
+        cls.odds_file = _ODDS_FILE
     
-    @unittest.skipIf(not os.path.exists(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-        'data', 'interleaved_cleaned.csv')), 
-        "interleaved_cleaned.csv not found")
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
     def test_returns_best_params_and_roi(self):
         """Test that GA returns best params and ROI value"""
         df = pd.read_csv(self.data_file, low_memory=False)
@@ -197,10 +198,7 @@ class TestGASearchParamsROI(unittest.TestCase):
         self.assertIn('w_mdec', best_params)
         self.assertIsInstance(best_roi, float)
     
-    @unittest.skipIf(not os.path.exists(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-        'data', 'interleaved_cleaned.csv')), 
-        "interleaved_cleaned.csv not found")
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
     def test_return_all_results(self):
         """Test that return_all_results option returns generation summaries"""
         df = pd.read_csv(self.data_file, low_memory=False)
@@ -232,6 +230,62 @@ class TestGASearchParamsROI(unittest.TestCase):
             self.assertIn('generation', gen_result)
             self.assertIn('best_fitness', gen_result)
             self.assertIn('best_params', gen_result)
+    
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
+    def test_lookback_days_parameter(self):
+        """Test that lookback_days parameter is properly accepted and used"""
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        # Run with lookback_days=365 (past year)
+        best_params, best_roi = ga_search_params_roi(
+            df,
+            odds_df,
+            population_size=3,
+            generations=1,
+            lookback_days=365,
+            seed=42,
+            verbose=False
+        )
+        
+        # Check return values
+        self.assertIsInstance(best_params, dict)
+        self.assertIsInstance(best_roi, float)
+    
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
+    def test_lookback_days_zero_uses_all_data(self):
+        """Test that lookback_days=0 uses all available data"""
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        # Run with lookback_days=0 (all data)
+        best_params, best_roi = ga_search_params_roi(
+            df,
+            odds_df,
+            population_size=3,
+            generations=1,
+            lookback_days=0,
+            seed=42,
+            verbose=False
+        )
+        
+        # Check return values
+        self.assertIsInstance(best_params, dict)
+        self.assertIsInstance(best_roi, float)
 
 
 class TestCalculateOOSROI(unittest.TestCase):
@@ -336,6 +390,8 @@ class TestMainBlockModeRouting(unittest.TestCase):
         self.parser = argparse.ArgumentParser(description="Genetic Algorithm for Elo Parameter Optimization")
         self.parser.add_argument("--mode", choices=["accuracy", "roi"], default="roi",
                                  help="Optimization mode: 'accuracy' (original) or 'roi' (ROI-based)")
+        self.parser.add_argument("--lookback-days", type=int, default=365, dest="lookback_days",
+                                 help="Number of days to look back for ROI optimization (default: 365)")
     
     def test_argparse_mode_default_is_roi(self):
         """Test that the default mode is 'roi'"""
@@ -361,6 +417,32 @@ class TestMainBlockModeRouting(unittest.TestCase):
         """Test that the mode condition 'args.mode == \"roi\"' correctly fails for accuracy mode"""
         args = self.parser.parse_args(["--mode", "accuracy"])
         self.assertFalse(args.mode == "roi", "Condition 'args.mode == \"roi\"' should be False for accuracy mode")
+    
+    def test_lookback_days_default_is_365(self):
+        """Test that the default lookback-days is 365"""
+        args = self.parser.parse_args([])
+        self.assertEqual(args.lookback_days, 365, "Default lookback_days should be 365")
+    
+    def test_lookback_days_explicit_180(self):
+        """Test that --lookback-days 180 is correctly parsed"""
+        args = self.parser.parse_args(["--lookback-days", "180"])
+        self.assertEqual(args.lookback_days, 180)
+    
+    def test_lookback_days_explicit_90(self):
+        """Test that --lookback-days 90 is correctly parsed"""
+        args = self.parser.parse_args(["--lookback-days", "90"])
+        self.assertEqual(args.lookback_days, 90)
+    
+    def test_lookback_days_explicit_0(self):
+        """Test that --lookback-days 0 disables lookback (uses all data)"""
+        args = self.parser.parse_args(["--lookback-days", "0"])
+        self.assertEqual(args.lookback_days, 0)
+    
+    def test_lookback_days_combined_with_mode(self):
+        """Test that --mode roi and --lookback-days can be used together"""
+        args = self.parser.parse_args(["--mode", "roi", "--lookback-days", "180"])
+        self.assertEqual(args.mode, "roi")
+        self.assertEqual(args.lookback_days, 180)
 
 
 class TestComputeExtendedROIMetrics(unittest.TestCase):
@@ -499,14 +581,11 @@ class TestEvaluateParamsROIExtended(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up class-level resources"""
-        cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        cls.data_file = os.path.join(cls.project_root, 'data', 'interleaved_cleaned.csv')
-        cls.odds_file = os.path.join(cls.project_root, 'after_averaging.csv')
+        cls.project_root = _PROJECT_ROOT
+        cls.data_file = _DATA_FILE
+        cls.odds_file = _ODDS_FILE
     
-    @unittest.skipIf(not os.path.exists(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-        'data', 'interleaved_cleaned.csv')), 
-        "interleaved_cleaned.csv not found")
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
     def test_return_extended_returns_dict(self):
         """Test that return_extended=True returns a dictionary with all metrics"""
         df = pd.read_csv(self.data_file, low_memory=False)
@@ -538,10 +617,7 @@ class TestEvaluateParamsROIExtended(unittest.TestCase):
         for key in required_keys:
             self.assertIn(key, result)
     
-    @unittest.skipIf(not os.path.exists(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-        'data', 'interleaved_cleaned.csv')), 
-        "interleaved_cleaned.csv not found")
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
     def test_return_extended_false_returns_float(self):
         """Test that return_extended=False returns a float"""
         df = pd.read_csv(self.data_file, low_memory=False)
@@ -574,14 +650,11 @@ class TestGASearchParamsROIExtendedResults(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up class-level resources"""
-        cls.project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        cls.data_file = os.path.join(cls.project_root, 'data', 'interleaved_cleaned.csv')
-        cls.odds_file = os.path.join(cls.project_root, 'after_averaging.csv')
+        cls.project_root = _PROJECT_ROOT
+        cls.data_file = _DATA_FILE
+        cls.odds_file = _ODDS_FILE
     
-    @unittest.skipIf(not os.path.exists(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-        'data', 'interleaved_cleaned.csv')), 
-        "interleaved_cleaned.csv not found")
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
     def test_all_results_contain_extended_metrics(self):
         """Test that all_results contains extended metrics for each generation"""
         df = pd.read_csv(self.data_file, low_memory=False)
@@ -613,10 +686,7 @@ class TestGASearchParamsROIExtendedResults(unittest.TestCase):
             for key in extended_keys:
                 self.assertIn(key, gen_result, f"Missing key {key} in generation results")
     
-    @unittest.skipIf(not os.path.exists(os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-        'data', 'interleaved_cleaned.csv')), 
-        "interleaved_cleaned.csv not found")
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
     def test_multi_objective_fitness_weights(self):
         """Test that fitness_weights parameter works"""
         df = pd.read_csv(self.data_file, low_memory=False)

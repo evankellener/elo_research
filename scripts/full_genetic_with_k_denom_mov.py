@@ -923,9 +923,14 @@ def ga_search_params_roi(
         if lookback_days and lookback_days > 0:
             max_date = df["DATE"].max()
             lookback_cutoff = max_date - pd.Timedelta(days=lookback_days)
-            print(f"Optimizing ROI for fights from {lookback_cutoff.date()} to {max_date.date()}")
+            print(f"Optimizing ROI for fights from {lookback_cutoff.date()} to {max_date.date()} (last {lookback_days} days)")
             recent_fights = df[df["DATE"] > lookback_cutoff]
-            print(f"Fights in lookback period ({lookback_days} days): {len(recent_fights)}")
+            # Count fights with odds in lookback period
+            odds_in_lookback = odds_df[odds_df["DATE"] > lookback_cutoff]
+            odds_fights_in_lookback = len(odds_in_lookback[['DATE', 'FIGHTER', 'opp_FIGHTER']].drop_duplicates()) // 2
+            print(f"Fights in lookback period: {len(recent_fights)}")
+            print(f"Fights with odds in lookback period: ~{odds_fights_in_lookback}")
+            print(f"Total fights with odds (all time): ~{num_odds_fights}")
         else:
             print(f"Optimizing ROI on ALL fights with available odds")
             print(f"Odds data date range: {odds_min_date.date()} to {odds_max_date.date()}")
@@ -1492,6 +1497,9 @@ if __name__ == "__main__":
     parser.add_argument("--population", type=int, default=30, help="Population size")
     parser.add_argument("--generations", type=int, default=30, help="Number of generations")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
+    parser.add_argument("--lookback-days", type=int, default=365, dest="lookback_days",
+                        help="Number of days to look back for ROI optimization (default: 365). "
+                             "Use 0 for all available data. Only applies to --mode roi.")
     args = parser.parse_args()
     
     df = pd.read_csv("data/interleaved_cleaned.csv", low_memory=False)
@@ -1520,22 +1528,49 @@ if __name__ == "__main__":
         print("\n" + "="*60)
         print("ROI-BASED GENETIC ALGORITHM OPTIMIZATION")
         print("="*60)
-        print("Optimizing parameters to maximize ROI on ALL fights with available odds")
+        
+        # Calculate and display lookback period details
+        max_date = df["DATE"].max()
+        if args.lookback_days and args.lookback_days > 0:
+            lookback_cutoff = max_date - pd.Timedelta(days=args.lookback_days)
+            print(f"Optimizing ROI on fights from {lookback_cutoff.date()} to {max_date.date()} (last {args.lookback_days} days)")
+            # Count fights in lookback period
+            fights_in_lookback = len(df[df["DATE"] > lookback_cutoff])
+            # Count unique fights with odds in lookback period
+            odds_df_copy = odds_df.copy()
+            odds_in_lookback = odds_df_copy[odds_df_copy["DATE"] > lookback_cutoff]
+            odds_fights_in_lookback = len(odds_in_lookback[['DATE', 'FIGHTER', 'opp_FIGHTER']].drop_duplicates()) // 2
+            print(f"Fights in lookback period: {fights_in_lookback}")
+            print(f"Fights with odds in lookback period: ~{odds_fights_in_lookback}")
+        else:
+            print(f"Optimizing ROI on ALL fights with available odds")
+            odds_min_date = odds_df["DATE"].min()
+            odds_max_date = odds_df["DATE"].max()
+            print(f"Odds data date range: {odds_min_date.date()} to {odds_max_date.date()}")
+        
+        # Count total fights with odds for reference
+        total_odds_fights = len(odds_df[['DATE', 'FIGHTER', 'opp_FIGHTER']].drop_duplicates()) // 2
+        print(f"Total fights with odds data: ~{total_odds_fights}")
+        print(f"Total historical fights: {len(df)}")
         print("Calling ga_search_params_roi()...")
         
-        # Run ROI-based GA search (uses all fights with odds by default)
+        # Run ROI-based GA search with lookback_days parameter
         best_params, best_roi = ga_search_params_roi(
             df,
             odds_df,
             test_df=test_df,
             population_size=args.population,
             generations=args.generations,
+            lookback_days=args.lookback_days,
             seed=args.seed,
         )
 
         print("\n=== GA best params (ROI-optimized) ===")
         print(best_params)
-        print(f"Best ROI on all fights with odds: {best_roi:.2f}%")
+        if args.lookback_days and args.lookback_days > 0:
+            print(f"Best ROI on fights in last {args.lookback_days} days: {best_roi:.2f}%")
+        else:
+            print(f"Best ROI on all fights with odds: {best_roi:.2f}%")
 
         # Train final Elo with best params on ALL DATA before test dates
         mov_params = {
