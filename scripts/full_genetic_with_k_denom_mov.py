@@ -923,7 +923,7 @@ def ga_search_params_roi(
         if lookback_days and lookback_days > 0:
             max_date = df["DATE"].max()
             lookback_cutoff = max_date - pd.Timedelta(days=lookback_days)
-            print(f"Optimizing ROI for fights from {lookback_cutoff.date()} to {max_date.date()} ({lookback_days} days)")
+            print(f"Optimizing ROI for fights from {lookback_cutoff.date()} to {max_date.date()} (last {lookback_days} days)")
             recent_fights = df[df["DATE"] > lookback_cutoff]
             # Count fights with odds in lookback period
             odds_in_lookback = odds_df[odds_df["DATE"] > lookback_cutoff]
@@ -1533,7 +1533,7 @@ if __name__ == "__main__":
         max_date = df["DATE"].max()
         if args.lookback_days and args.lookback_days > 0:
             lookback_cutoff = max_date - pd.Timedelta(days=args.lookback_days)
-            print(f"Optimizing ROI on fights from {lookback_cutoff.date()} to {max_date.date()} ({args.lookback_days} days)")
+            print(f"Optimizing ROI on fights from {lookback_cutoff.date()} to {max_date.date()} (last {args.lookback_days} days)")
             # Count fights in lookback period
             fights_in_lookback = len(df[df["DATE"] > lookback_cutoff])
             # Count unique fights with odds in lookback period
