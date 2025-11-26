@@ -1504,7 +1504,14 @@ if __name__ == "__main__":
     
     df = pd.read_csv("data/interleaved_cleaned.csv", low_memory=False)
     test_df = pd.read_csv("data/past3_events.csv", low_memory=False)
-    odds_df = pd.read_csv("after_averaging.csv", low_memory=False)
+    odds_df = pd.read_csv("data/past3_events.csv", low_memory=False)
+    
+    # Normalize column names: rename lowercase to uppercase for compatibility
+    odds_df = odds_df.rename(columns={
+        'date': 'DATE',
+        'fighter': 'FIGHTER', 
+        'opp_fighter': 'opp_FIGHTER'
+    })
 
     df["result"] = pd.to_numeric(df["result"], errors="coerce")
     df["DATE"] = pd.to_datetime(df["DATE"]).dt.tz_localize(None)
