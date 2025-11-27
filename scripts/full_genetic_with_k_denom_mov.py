@@ -5,7 +5,7 @@ import numpy as np
 import unicodedata
 from multiprocessing import Pool, cpu_count
 from functools import partial
-from elo_utils import mov_factor, build_fighter_history, has_prior_history, add_bout_counts
+from elo_utils import mov_factor, build_fighter_history, has_prior_history, add_bout_counts, apply_decay
 
 
 def normalize_name(name):
@@ -61,23 +61,40 @@ def find_fighter_match(test_name, training_names):
 # =========================
 
 
-def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, draw_k_factor=0.5):
+def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, draw_k_factor=0.5,
+                  decay_mode="none", decay_rate=0.0, min_days=180):
     """
-    Core Elo engine, with optional method of victory multipliers.
-    mov_params is a dict with the MoV weights, or None for no adjustment.
-    draw_k_factor: Multiplier for K-factor in draws (default 0.5, meaning draws have half the impact)
+    Core Elo engine, with optional method of victory multipliers and decay.
+    
+    Args:
+        df: DataFrame with fight data
+        k: Base K-factor (default 32)
+        base_elo: Starting Elo rating (default 1500)
+        denominator: Elo denominator (default 400)
+        mov_params: Dict with MoV weights, or None for no adjustment
+        draw_k_factor: Multiplier for K-factor in draws (default 0.5)
+        decay_mode: "linear", "exponential", or "none" (default "none")
+        decay_rate: Decay rate per day (default 0.0)
+        min_days: Minimum days before decay starts (default 180)
     
     Note: Assumes df is sorted by DATE. If not, results may be incorrect.
+    
+    The decay is applied to precomp_elo BEFORE prediction but does NOT affect 
+    the stored postcomp_elo. The adjusted precomp_elo is used only for 
+    calculating expected scores and making predictions.
     """
     df = df.copy()
     # Ensure dataframe is sorted by date for correct chronological processing
     if "DATE" in df.columns:
         df = df.sort_values("DATE").reset_index(drop=True)
     ratings = {}
+    last_fight_dates = {}  # Track last fight date for each fighter
     pre, post, opp_pre, opp_post = [], [], [], []
+    adjusted_pre, adjusted_opp_pre = [], []  # Track decay-adjusted precomp_elo
 
     for _, row in df.iterrows():
         f1, f2, res = row["FIGHTER"], row["opp_FIGHTER"], row["result"]
+        current_date = row.get("DATE")
         
         # Check if this is a draw (both win and loss are 0)
         # Note: Default value of 1 means if columns don't exist, it won't be detected as a draw
@@ -90,10 +107,31 @@ def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, dra
         
         r1 = ratings.get(f1, base_elo)
         r2 = ratings.get(f2, base_elo)
+        
+        # Apply decay adjustment for predictions (if decay is enabled)
+        r1_adjusted = r1
+        r2_adjusted = r2
+        
+        if decay_mode != "none" and current_date is not None and decay_rate > 0:
+            # Calculate days since last fight for each fighter
+            last_date_f1 = last_fight_dates.get(f1)
+            last_date_f2 = last_fight_dates.get(f2)
+            
+            days_since_f1 = None
+            days_since_f2 = None
+            
+            if last_date_f1 is not None:
+                days_since_f1 = (current_date - last_date_f1).days
+            if last_date_f2 is not None:
+                days_since_f2 = (current_date - last_date_f2).days
+            
+            # Apply decay to get adjusted ratings for prediction
+            r1_adjusted = apply_decay(r1, days_since_f1, decay_rate, min_days, decay_mode)
+            r2_adjusted = apply_decay(r2, days_since_f2, decay_rate, min_days, decay_mode)
 
-        # Base expected scores
-        e1 = 1.0 / (1.0 + 10.0 ** ((r2 - r1) / denominator))
-        e2 = 1.0 / (1.0 + 10.0 ** ((r1 - r2) / denominator))
+        # Base expected scores (use adjusted ratings for prediction)
+        e1 = 1.0 / (1.0 + 10.0 ** ((r2_adjusted - r1_adjusted) / denominator))
+        e2 = 1.0 / (1.0 + 10.0 ** ((r1_adjusted - r2_adjusted) / denominator))
 
         # Method of victory factor
         if mov_params is not None:
@@ -107,19 +145,38 @@ def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, dra
         if is_draw:
             k_eff = k_eff * draw_k_factor
 
+        # Update ratings using the original (non-decayed) ratings
+        # Decay only affects predictions, not the stored postcomp_elo
         r1_new = r1 + k_eff * (res - e1)
         r2_new = r2 + k_eff * ((1 - res) - e2)
 
         ratings[f1], ratings[f2] = r1_new, r2_new
+        
+        # Update last fight dates for both fighters
+        if current_date is not None:
+            last_fight_dates[f1] = current_date
+            last_fight_dates[f2] = current_date
+        
+        # Store original precomp_elo values (unchanged for reference)
         pre.append(r1)
         post.append(r1_new)
         opp_pre.append(r2)
         opp_post.append(r2_new)
+        
+        # Store adjusted precomp_elo values (for analysis)
+        adjusted_pre.append(r1_adjusted)
+        adjusted_opp_pre.append(r2_adjusted)
 
     df["precomp_elo"] = pre
     df["postcomp_elo"] = post
     df["opp_precomp_elo"] = opp_pre
     df["opp_postcomp_elo"] = opp_post
+    
+    # Add adjusted precomp_elo columns if decay is enabled
+    if decay_mode != "none":
+        df["adjusted_precomp_elo"] = adjusted_pre
+        df["adjusted_opp_precomp_elo"] = adjusted_opp_pre
+    
     return df
 
 
@@ -374,12 +431,14 @@ def _calculate_oos_accuracy_worker(args):
     return params_dict["index"], oos_acc
 
 PARAM_BOUNDS = {
-    "k":      (10.0, 500.0),
-    "w_ko":   (1.0, 2.0),
-    "w_sub":  (1.0, 2.0),
-    "w_udec": (0.8, 1.2),
-    "w_sdec": (0.5, 1.1),
-    "w_mdec": (0.7, 1.2),
+    "k":          (10.0, 500.0),
+    "w_ko":       (1.0, 2.0),
+    "w_sub":      (1.0, 2.0),
+    "w_udec":     (0.8, 1.2),
+    "w_sdec":     (0.5, 1.1),
+    "w_mdec":     (0.7, 1.2),
+    "decay_rate": (0.0, 0.01),    # Decay rate per day
+    "min_days":   (0, 365),       # Minimum days before decay starts
 }
 
 
@@ -388,8 +447,17 @@ def random_param_value(key):
     return random.uniform(lo, hi)
 
 
-def random_params():
-    return {
+def random_params(include_decay=False):
+    """
+    Generate random parameter values for GA optimization.
+    
+    Args:
+        include_decay: If True, includes decay_rate and min_days parameters
+    
+    Returns:
+        dict: Random parameter values
+    """
+    params = {
         "k":      random_param_value("k"),
         "w_ko":   random_param_value("w_ko"),
         "w_sub":  random_param_value("w_sub"),
@@ -397,6 +465,10 @@ def random_params():
         "w_sdec": random_param_value("w_sdec"),
         "w_mdec": random_param_value("w_mdec"),
     }
+    if include_decay:
+        params["decay_rate"] = random_param_value("decay_rate")
+        params["min_days"] = int(random_param_value("min_days"))
+    return params
 
 
 def clip_param(key, value):
@@ -404,10 +476,16 @@ def clip_param(key, value):
     return max(lo, min(hi, value))
 
 
-def evaluate_params(df, cutoff_date, params):
+def evaluate_params(df, cutoff_date, params, decay_mode="none"):
     """
     Run Elo with given params and return future accuracy.
     Training accuracy already uses boutcount rule through compute_fight_predictions.
+    
+    Args:
+        df: Training data
+        cutoff_date: Date to split training/validation
+        params: Dict with k, w_ko, w_sub, w_udec, w_sdec, w_mdec, and optionally decay_rate, min_days
+        decay_mode: "linear", "exponential", or "none" (default "none")
     """
     mov_params = {
         "w_ko":   params["w_ko"],
@@ -417,8 +495,13 @@ def evaluate_params(df, cutoff_date, params):
         "w_mdec": params["w_mdec"],
     }
     k = params["k"]
+    
+    # Get decay parameters if present
+    decay_rate = params.get("decay_rate", 0.0)
+    min_days = params.get("min_days", 180)
 
-    trial = run_basic_elo(df, k=k, mov_params=mov_params)
+    trial = run_basic_elo(df, k=k, mov_params=mov_params, 
+                          decay_mode=decay_mode, decay_rate=decay_rate, min_days=min_days)
     _, acc_future, _ = elo_accuracy(trial, cutoff_date)
 
     if acc_future is None:
@@ -680,7 +763,7 @@ def compute_extended_roi_metrics(bet_records):
     }
 
 
-def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=False):
+def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=False, decay_mode="none"):
     """
     Run Elo with given params and return ROI% for fights with available odds.
     
@@ -692,10 +775,11 @@ def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=Fa
     Args:
         df: Training data (all historical fight data with DATE, FIGHTER, opp_FIGHTER, result)
         odds_df: Odds data with DATE, FIGHTER, opp_FIGHTER, avg_odds columns
-        params: Dict with k, w_ko, w_sub, w_udec, w_sdec, w_mdec
+        params: Dict with k, w_ko, w_sub, w_udec, w_sdec, w_mdec, and optionally decay_rate, min_days
         lookback_days: Number of days to look back for ROI calculation (default 0 = all data)
                        Set to 0 or None to use all fights with available odds
         return_extended: If True, return dict with extended metrics instead of just ROI
+        decay_mode: "linear", "exponential", or "none" (default "none")
     
     Returns:
         If return_extended=False: float: ROI percentage (0 if no valid bets)
@@ -711,8 +795,13 @@ def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=Fa
     }
     k = params["k"]
     
+    # Get decay parameters if present
+    decay_rate = params.get("decay_rate", 0.0)
+    min_days = params.get("min_days", 180)
+    
     # Train Elo on ALL historical data
-    df_with_elo = run_basic_elo(df.copy(), k=k, mov_params=mov_params)
+    df_with_elo = run_basic_elo(df.copy(), k=k, mov_params=mov_params,
+                                 decay_mode=decay_mode, decay_rate=decay_rate, min_days=min_days)
     
     # Filter to recent fights if lookback_days is specified (>0)
     if lookback_days and lookback_days > 0:
@@ -874,6 +963,7 @@ def ga_search_params_roi(
     return_all_results=False,
     verbose=True,
     fitness_weights=None,
+    decay_mode="none",
 ):
     """
     Full GA search over k and method of victory weights using ROI as fitness.
@@ -899,11 +989,15 @@ def ga_search_params_roi(
         fitness_weights: Optional dict with weights for multi-objective fitness:
                         {'roi': 0.6, 'trend': 0.3, 'sharpe': 0.1}
                         If None, uses ROI only. Values are normalized internally.
+        decay_mode: "linear", "exponential", or "none" (default "none")
+                    If not "none", decay_rate and min_days will be included in optimization
     
     Returns:
         If return_all_results=False: best_params, best_fitness
         If return_all_results=True: best_params, best_fitness, all_results
     """
+    include_decay = decay_mode != "none"
+    
     if seed is not None:
         random.seed(seed)
     
@@ -938,6 +1032,8 @@ def ga_search_params_roi(
         print(f"Total historical fights: {len(df)}")
         if fitness_weights:
             print(f"Multi-objective fitness weights: {fitness_weights}")
+        if decay_mode != "none":
+            print(f"Decay mode: {decay_mode} (optimizing decay_rate and min_days)")
     
     all_results = []
     
@@ -965,14 +1061,15 @@ def ga_search_params_roi(
     
     def evaluate_individual(params):
         """Evaluate params and return fitness plus extended metrics."""
-        extended = evaluate_params_roi(df, odds_df, params, lookback_days=lookback_days, return_extended=True)
+        extended = evaluate_params_roi(df, odds_df, params, lookback_days=lookback_days, 
+                                        return_extended=True, decay_mode=decay_mode)
         fitness = compute_fitness(extended)
         return fitness, extended
     
     # Initialize population with diverse parameters
     population = []
     for i in range(population_size):
-        p = random_params()
+        p = random_params(include_decay=include_decay)
         fitness, extended = evaluate_individual(p)
         population.append({"params": p, "fitness": fitness, "extended": extended})
     
@@ -1003,8 +1100,8 @@ def ga_search_params_roi(
         while len(new_population) < population_size:
             parent1 = tournament_select(population)
             parent2 = tournament_select(population)
-            child_params = crossover(parent1, parent2)
-            child_params = mutate(child_params)
+            child_params = crossover(parent1, parent2, include_decay=include_decay)
+            child_params = mutate(child_params, include_decay=include_decay)
             
             fitness, extended = evaluate_individual(child_params)
             new_population.append({"params": child_params, "fitness": fitness, "extended": extended})
@@ -1028,6 +1125,13 @@ def ga_search_params_roi(
             sharpe_str = f"{ext.get('sharpe_ratio', 0):.2f}" if ext.get('sharpe_ratio') is not None else "N/A"
             win_rate_str = f"{ext.get('win_rate', 0)*100:.0f}%" if ext.get('win_rate') is not None else "N/A"
             num_bets = ext.get('num_bets', 0)
+            
+            # Include decay params in verbose output if enabled
+            decay_str = ""
+            if include_decay:
+                decay_rate = gen_best['params'].get('decay_rate', 0)
+                min_days_val = gen_best['params'].get('min_days', 180)
+                decay_str = f", decay_rate={decay_rate:.5f}, min_days={min_days_val:.0f}"
             
             print(
                 f"Gen {gen + 1:02d}, best ROI={roi:+.2f}%, Trend={trend_str}, "
@@ -1222,45 +1326,92 @@ def tournament_select(population, k_tour=3):
     return contenders[0]
 
 
-def crossover(parent1, parent2, crossover_rate=0.5):
+def crossover(parent1, parent2, crossover_rate=0.5, include_decay=False):
     """
     Simple crossover.
     For each param, with probability crossover_rate take average, else take one parent.
+    
+    Args:
+        parent1: First parent individual
+        parent2: Second parent individual
+        crossover_rate: Probability of averaging vs taking from one parent
+        include_decay: If True, includes decay_rate and min_days in crossover
     """
     child_params = {}
-    for key in parent1["params"].keys():
-        v1 = parent1["params"][key]
-        v2 = parent2["params"][key]
+    # Determine which keys to process
+    keys_to_process = set(parent1["params"].keys())
+    if not include_decay:
+        keys_to_process -= {"decay_rate", "min_days"}
+    
+    for key in keys_to_process:
+        v1 = parent1["params"].get(key)
+        v2 = parent2["params"].get(key)
+        
+        # Skip if either parent doesn't have this key
+        if v1 is None or v2 is None:
+            continue
+            
         if random.random() < crossover_rate:
-            child_params[key] = 0.5 * (v1 + v2)
+            new_val = 0.5 * (v1 + v2)
+            # Ensure min_days is an integer
+            if key == "min_days":
+                new_val = int(new_val)
+            child_params[key] = new_val
         else:
-            child_params[key] = random.choice([v1, v2])
+            val = random.choice([v1, v2])
+            if key == "min_days":
+                val = int(val)
+            child_params[key] = val
     return child_params
 
 
-def mutate(params, mutation_rate=0.3, mutation_scale=0.1):
+def mutate(params, mutation_rate=0.3, mutation_scale=0.1, include_decay=False):
     """
     Gaussian mutation: for each param, with probability mutation_rate,
     add noise proportional to range * mutation_scale.
+    
+    Args:
+        params: Dictionary of parameters
+        mutation_rate: Probability of mutating each parameter
+        mutation_scale: Scale factor for Gaussian noise
+        include_decay: If True, includes decay_rate and min_days in mutation
     """
     new_params = params.copy()
     mutated = False
-    for key in new_params.keys():
+    
+    # Determine which keys to mutate
+    keys_to_mutate = set(new_params.keys())
+    if not include_decay:
+        keys_to_mutate -= {"decay_rate", "min_days"}
+    
+    for key in keys_to_mutate:
+        if key not in PARAM_BOUNDS:
+            continue
         if random.random() < mutation_rate:
             lo, hi = PARAM_BOUNDS[key]
             span = hi - lo
             noise = random.gauss(0.0, mutation_scale * span)
             new_val = new_params[key] + noise
-            new_params[key] = clip_param(key, new_val)
+            new_val = clip_param(key, new_val)
+            # Ensure min_days is an integer
+            if key == "min_days":
+                new_val = int(new_val)
+            new_params[key] = new_val
             mutated = True
+    
     # Ensure at least one parameter is mutated to maintain diversity
     if not mutated and random.random() < 0.5:
-        key = random.choice(list(new_params.keys()))
-        lo, hi = PARAM_BOUNDS[key]
-        span = hi - lo
-        noise = random.gauss(0.0, mutation_scale * span)
-        new_val = new_params[key] + noise
-        new_params[key] = clip_param(key, new_val)
+        valid_keys = [k for k in keys_to_mutate if k in PARAM_BOUNDS]
+        if valid_keys:
+            key = random.choice(valid_keys)
+            lo, hi = PARAM_BOUNDS[key]
+            span = hi - lo
+            noise = random.gauss(0.0, mutation_scale * span)
+            new_val = new_params[key] + noise
+            new_val = clip_param(key, new_val)
+            if key == "min_days":
+                new_val = int(new_val)
+            new_params[key] = new_val
     return new_params
 
 
@@ -1500,6 +1651,11 @@ if __name__ == "__main__":
     parser.add_argument("--lookback-days", type=int, default=365, dest="lookback_days",
                         help="Number of days to look back for ROI optimization (default: 365). "
                              "Use 0 for all available data. Only applies to --mode roi.")
+    parser.add_argument("--decay-mode", choices=["linear", "exponential", "none"], default="none",
+                        dest="decay_mode",
+                        help="Decay mode for Elo ratings: 'linear', 'exponential', or 'none' (default: none). "
+                             "When set to 'linear' or 'exponential', decay_rate and min_days will be "
+                             "included in GA optimization.")
     args = parser.parse_args()
     
     df = pd.read_csv("data/interleaved_cleaned.csv", low_memory=False)
@@ -1522,6 +1678,7 @@ if __name__ == "__main__":
 
     print(f"Test data date range: {test_df['date'].min()} to {test_df['date'].max()}")
     print(f"Running in mode: {args.mode}")
+    print(f"Decay mode: {args.decay_mode}")
     print(f"Mode check: args.mode == 'roi' is {args.mode == 'roi'}")
 
     if args.mode == "roi":
@@ -1554,7 +1711,7 @@ if __name__ == "__main__":
         print(f"Total historical fights: {len(df)}")
         print("Calling ga_search_params_roi()...")
         
-        # Run ROI-based GA search with lookback_days parameter
+        # Run ROI-based GA search with lookback_days parameter and decay_mode
         best_params, best_roi = ga_search_params_roi(
             df,
             odds_df,
@@ -1563,6 +1720,7 @@ if __name__ == "__main__":
             generations=args.generations,
             lookback_days=args.lookback_days,
             seed=args.seed,
+            decay_mode=args.decay_mode,
         )
 
         print("\n=== GA best params (ROI-optimized) ===")
@@ -1581,11 +1739,15 @@ if __name__ == "__main__":
             "w_mdec": best_params["w_mdec"],
         }
         best_k = best_params["k"]
+        best_decay_rate = best_params.get("decay_rate", 0.0)
+        best_min_days = best_params.get("min_days", 180)
 
         # Use ALL data before the test dates for final training
         test_start_date = pd.to_datetime(test_df["date"]).min()
         df_train_all = df[df["DATE"] < test_start_date].copy()
-        df_trained = run_basic_elo(df_train_all, k=best_k, mov_params=mov_params)
+        df_trained = run_basic_elo(df_train_all, k=best_k, mov_params=mov_params,
+                                   decay_mode=args.decay_mode, decay_rate=best_decay_rate, 
+                                   min_days=best_min_days)
 
         # OOS ROI evaluation on past 3 events
         # Use test_df as the odds source for OOS evaluation (it has avg_odds column)
