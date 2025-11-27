@@ -597,9 +597,9 @@ def random_params(include_decay=False, multiphase_decay=False, weight_adjust=Fal
         params["min_days"] = int(random_param_value("min_days", param_bounds))
     
     if multiphase_decay:
-        params["quick_succession_days"] = random_param_value("quick_succession_days", param_bounds)
+        params["quick_succession_days"] = int(random_param_value("quick_succession_days", param_bounds))
         params["quick_succession_bump"] = random_param_value("quick_succession_bump", param_bounds)
-        params["decay_days"] = random_param_value("decay_days", param_bounds)
+        params["decay_days"] = int(random_param_value("decay_days", param_bounds))
         params["multiphase_decay_rate"] = random_param_value("multiphase_decay_rate", param_bounds)
     
     if weight_adjust:
@@ -1581,13 +1581,13 @@ def crossover(parent1, parent2, crossover_rate=0.5, include_decay=False,
             
         if random.random() < crossover_rate:
             new_val = 0.5 * (v1 + v2)
-            # Ensure min_days is an integer
-            if key == "min_days":
+            # Ensure day-count parameters are integers
+            if key in ("min_days", "quick_succession_days", "decay_days"):
                 new_val = int(new_val)
             child_params[key] = new_val
         else:
             val = random.choice([v1, v2])
-            if key == "min_days":
+            if key in ("min_days", "quick_succession_days", "decay_days"):
                 val = int(val)
             child_params[key] = val
     return child_params
@@ -1621,6 +1621,9 @@ def mutate(params, mutation_rate=0.3, mutation_scale=0.1, include_decay=False,
     if not include_decay:
         keys_to_mutate -= {"decay_rate", "min_days"}
     
+    # Day-count parameters that should be integers
+    integer_params = {"min_days", "quick_succession_days", "decay_days"}
+    
     for key in keys_to_mutate:
         if key not in param_bounds:
             continue
@@ -1630,8 +1633,8 @@ def mutate(params, mutation_rate=0.3, mutation_scale=0.1, include_decay=False,
             noise = random.gauss(0.0, mutation_scale * span)
             new_val = new_params[key] + noise
             new_val = clip_param(key, new_val, param_bounds)
-            # Ensure min_days is an integer
-            if key == "min_days":
+            # Ensure day-count parameters are integers
+            if key in integer_params:
                 new_val = int(new_val)
             new_params[key] = new_val
             mutated = True
@@ -1646,7 +1649,7 @@ def mutate(params, mutation_rate=0.3, mutation_scale=0.1, include_decay=False,
             noise = random.gauss(0.0, mutation_scale * span)
             new_val = new_params[key] + noise
             new_val = clip_param(key, new_val, param_bounds)
-            if key == "min_days":
+            if key in integer_params:
                 new_val = int(new_val)
             new_params[key] = new_val
     return new_params
