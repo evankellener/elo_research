@@ -77,10 +77,18 @@ def load_data():
     return df, test_df, odds_df, test_odds_df
 
 
-def get_best_params():
-    """Return the best GA parameters found (from previous optimization)."""
+def get_best_params(include_decay=False):
+    """
+    Return the best GA parameters found (from previous optimization).
+    
+    Args:
+        include_decay: If True, include decay_rate and min_days parameters
+    
+    Returns:
+        dict: Best parameters for Elo optimization
+    """
     # These are representative best params from the GA optimization
-    return {
+    params = {
         "k": 266.33,
         "w_ko": 1.02,
         "w_sub": 1.74,
@@ -88,13 +96,17 @@ def get_best_params():
         "w_sdec": 0.70,
         "w_mdec": 0.81,
     }
+    if include_decay:
+        params["decay_rate"] = 0.0005  # Default decay rate
+        params["min_days"] = 180  # Default minimum days
+    return params
 
 
 # =============================================================================
 # Test 1: Rolling OOS Backtest
 # =============================================================================
 
-def test_rolling_oos_backtest(df, odds_df, window_days=90, step_days=30, n_windows=10, verbose=True):
+def test_rolling_oos_backtest(df, odds_df, window_days=90, step_days=30, n_windows=10, verbose=True, decay_mode="none"):
     """
     Test 1: Rolling OOS Backtest
     
@@ -110,6 +122,7 @@ def test_rolling_oos_backtest(df, odds_df, window_days=90, step_days=30, n_windo
         step_days: Step size between windows
         n_windows: Number of windows to test
         verbose: Print progress
+        decay_mode: "linear", "exponential", or "none" (default: "none")
     
     Returns:
         DataFrame with results for each window
@@ -119,6 +132,8 @@ def test_rolling_oos_backtest(df, odds_df, window_days=90, step_days=30, n_windo
         print("TEST 1: Rolling OOS Backtest")
         print("="*60)
         print(f"Window size: {window_days} days, Step: {step_days} days, N windows: {n_windows}")
+        if decay_mode != "none":
+            print(f"Decay mode: {decay_mode}")
     
     max_date = df["DATE"].max()
     min_date = df["DATE"].min()
@@ -158,7 +173,8 @@ def test_rolling_oos_backtest(df, odds_df, window_days=90, step_days=30, n_windo
             generations=5,
             lookback_days=90,
             seed=42 + i,
-            verbose=False
+            verbose=False,
+            decay_mode=decay_mode,
         )
         
         # Calculate ROI on test window using trained params
@@ -166,7 +182,8 @@ def test_rolling_oos_backtest(df, odds_df, window_days=90, step_days=30, n_windo
             pd.concat([train_df, test_window_df]).sort_values("DATE").reset_index(drop=True),
             window_odds,
             best_params,
-            lookback_days=window_days
+            lookback_days=window_days,
+            decay_mode=decay_mode,
         )
         
         results.append({
@@ -200,7 +217,7 @@ def test_rolling_oos_backtest(df, odds_df, window_days=90, step_days=30, n_windo
 # Test 2: Parameter Robustness
 # =============================================================================
 
-def test_parameter_robustness(df, test_df, odds_df, test_odds_df, n_random=10, verbose=True):
+def test_parameter_robustness(df, test_df, odds_df, test_odds_df, n_random=10, verbose=True, decay_mode="none"):
     """
     Test 2: Parameter Robustness
     
@@ -215,16 +232,21 @@ def test_parameter_robustness(df, test_df, odds_df, test_odds_df, n_random=10, v
         test_odds_df: OOS test odds
         n_random: Number of random parameter sets to test
         verbose: Print progress
+        decay_mode: "linear", "exponential", or "none" (default: "none")
     
     Returns:
         DataFrame with results for each parameter set
     """
+    include_decay = decay_mode != "none"
+    
     if verbose:
         print("\n" + "="*60)
         print("TEST 2: Parameter Robustness")
         print("="*60)
+        if decay_mode != "none":
+            print(f"Decay mode: {decay_mode}")
     
-    best_params = get_best_params()
+    best_params = get_best_params(include_decay=include_decay)
     
     # Get training cutoff date
     test_start_date = pd.to_datetime(test_df["date"]).min()
@@ -234,11 +256,18 @@ def test_parameter_robustness(df, test_df, odds_df, test_odds_df, n_random=10, v
     results = []
     
     # Test best params
-    train_roi = evaluate_params_roi(train_df, train_odds, best_params, lookback_days=90)
+    train_roi = evaluate_params_roi(train_df, train_odds, best_params, lookback_days=90, decay_mode=decay_mode)
+    
+    # Get decay parameters from best_params
+    decay_rate = best_params.get("decay_rate", 0.0)
+    min_days = best_params.get("min_days", 180)
     
     # Train Elo and calculate OOS ROI
     mov_params = {k: v for k, v in best_params.items() if k.startswith('w_')}
-    df_trained = run_basic_elo(train_df.copy(), k=best_params['k'], mov_params=mov_params)
+    df_trained = run_basic_elo(
+        train_df.copy(), k=best_params['k'], mov_params=mov_params,
+        decay_mode=decay_mode, decay_rate=decay_rate, min_days=min_days
+    )
     oos_result = calculate_oos_roi(df_trained, test_df, test_odds_df, verbose=False)
     
     results.append({
@@ -256,12 +285,19 @@ def test_parameter_robustness(df, test_df, odds_df, test_odds_df, n_random=10, v
     # Test random params
     random.seed(42)
     for i in range(n_random):
-        rand_params = random_params()
+        rand_params = random_params(include_decay=include_decay)
         
-        train_roi = evaluate_params_roi(train_df, train_odds, rand_params, lookback_days=90)
+        train_roi = evaluate_params_roi(train_df, train_odds, rand_params, lookback_days=90, decay_mode=decay_mode)
+        
+        # Get decay parameters from rand_params
+        decay_rate = rand_params.get("decay_rate", 0.0)
+        min_days = rand_params.get("min_days", 180)
         
         mov_params = {k: v for k, v in rand_params.items() if k.startswith('w_')}
-        df_trained = run_basic_elo(train_df.copy(), k=rand_params['k'], mov_params=mov_params)
+        df_trained = run_basic_elo(
+            train_df.copy(), k=rand_params['k'], mov_params=mov_params,
+            decay_mode=decay_mode, decay_rate=decay_rate, min_days=min_days
+        )
         oos_result = calculate_oos_roi(df_trained, test_df, test_odds_df, verbose=False)
         
         results.append({
@@ -889,12 +925,19 @@ def create_diagnostic_plots(results, output_dir=None):
 # Main
 # =============================================================================
 
-def run_all_tests(verbose=True):
-    """Run all diagnostic tests and return results."""
+def run_all_tests(verbose=True, decay_mode="none"):
+    """Run all diagnostic tests and return results.
+    
+    Args:
+        verbose: Print progress
+        decay_mode: "linear", "exponential", or "none" (default: "none")
+    """
     print("="*60)
     print("DIAGNOSTIC TEST SUITE")
     print("ROI Performance Degradation Analysis")
     print("="*60)
+    if decay_mode != "none":
+        print(f"Decay mode: {decay_mode}")
     
     # Load data
     print("\nLoading data...")
@@ -910,7 +953,8 @@ def run_all_tests(verbose=True):
         results['rolling_oos'] = test_rolling_oos_backtest(
             df, odds_df, 
             window_days=90, step_days=45, n_windows=5,
-            verbose=verbose
+            verbose=verbose,
+            decay_mode=decay_mode,
         )
     except Exception as e:
         print(f"Test 1 error: {e}")
@@ -921,7 +965,8 @@ def run_all_tests(verbose=True):
         results['param_robustness'] = test_parameter_robustness(
             df, test_df, odds_df, test_odds_df,
             n_random=5,
-            verbose=verbose
+            verbose=verbose,
+            decay_mode=decay_mode,
         )
     except Exception as e:
         print(f"Test 2 error: {e}")
@@ -1013,20 +1058,26 @@ def main():
         "--quiet", action="store_true",
         help="Reduce output verbosity"
     )
+    parser.add_argument(
+        "--decay-mode", choices=["linear", "exponential", "none"], default="none",
+        dest="decay_mode",
+        help="Decay mode for Elo ratings: 'linear', 'exponential', or 'none' (default: none)"
+    )
     
     args = parser.parse_args()
     
     verbose = not args.quiet
+    decay_mode = args.decay_mode
     
     # Load data
     df, test_df, odds_df, test_odds_df = load_data()
     
     if args.all or args.test is None:
-        run_all_tests(verbose=verbose)
+        run_all_tests(verbose=verbose, decay_mode=decay_mode)
     elif args.test == 1:
-        test_rolling_oos_backtest(df, odds_df, verbose=verbose)
+        test_rolling_oos_backtest(df, odds_df, verbose=verbose, decay_mode=decay_mode)
     elif args.test == 2:
-        test_parameter_robustness(df, test_df, odds_df, test_odds_df, verbose=verbose)
+        test_parameter_robustness(df, test_df, odds_df, test_odds_df, verbose=verbose, decay_mode=decay_mode)
     elif args.test == 3:
         test_reshuffle_oos(df, odds_df, verbose=verbose)
     elif args.test == 4:
