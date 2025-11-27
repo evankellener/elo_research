@@ -1013,6 +1013,11 @@ def main():
         "--quiet", action="store_true",
         help="Reduce output verbosity"
     )
+    parser.add_argument(
+        "--decay-mode", choices=["linear", "exponential", "none"], default="none",
+        dest="decay_mode",
+        help="Decay mode for Elo ratings: 'linear', 'exponential', or 'none' (default: none)"
+    )
     
     args = parser.parse_args()
     

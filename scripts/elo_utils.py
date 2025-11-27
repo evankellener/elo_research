@@ -174,3 +174,137 @@ def add_bout_counts(df):
     df["opp_precomp_boutcount"] = opp_pre_counts
     return df
 
+
+def build_fighter_last_fight_date(df):
+    """
+    Build a dictionary mapping fighter names to their last fight date.
+    
+    This function processes the DataFrame chronologically and tracks the most
+    recent fight date for each fighter. It handles both the FIGHTER and
+    opp_FIGHTER columns to capture all fights.
+    
+    Args:
+        df: DataFrame with columns DATE, FIGHTER, opp_FIGHTER (must be sorted by DATE)
+    
+    Returns:
+        dict: Mapping of fighter name to their last fight date as pd.Timestamp
+    """
+    df = df.sort_values("DATE").copy()
+    last_fight_dates = {}
+    
+    for _, row in df.iterrows():
+        date = row["DATE"]
+        f1 = row["FIGHTER"]
+        f2 = row["opp_FIGHTER"]
+        
+        # Update last fight date for both fighters
+        last_fight_dates[f1] = date
+        last_fight_dates[f2] = date
+    
+    return last_fight_dates
+
+
+def get_last_fight_date_before(fighter, current_date, last_fight_dates_history):
+    """
+    Get the last fight date for a fighter before a given date.
+    
+    This is used during Elo calculation to get the last fight date
+    as of the current fight being processed.
+    
+    Args:
+        fighter: Fighter name
+        current_date: The date of the current fight
+        last_fight_dates_history: Dict mapping (fighter, date) tuples to last fight date
+                                  OR dict from build_fighter_last_fight_date for lookup
+    
+    Returns:
+        pd.Timestamp or None: The last fight date before current_date, or None if no prior fight
+    """
+    return last_fight_dates_history.get(fighter)
+
+
+def apply_linear_decay(elo, days_since_fight, decay_rate, min_days=180):
+    """
+    Apply linear decay to an Elo rating based on time since last fight.
+    
+    Formula: adjusted_elo = elo * (1 - decay_rate * days_since_fight)
+    
+    Only applies decay if days_since_fight >= min_days.
+    The decay is clamped to ensure the Elo doesn't go below 50% of original.
+    
+    Args:
+        elo: Current Elo rating
+        days_since_fight: Number of days since fighter's last fight
+        decay_rate: Decay rate per day (e.g., 0.0005 = 0.05% per day)
+        min_days: Minimum days before decay starts (default 180)
+    
+    Returns:
+        float: Adjusted Elo rating after decay
+    """
+    if days_since_fight is None or days_since_fight < min_days:
+        return elo
+    
+    # Apply decay only to the days beyond min_days
+    effective_days = days_since_fight - min_days
+    decay_factor = 1.0 - decay_rate * effective_days
+    
+    # Clamp to prevent excessive decay (minimum 50% of original)
+    decay_factor = max(0.5, decay_factor)
+    
+    return elo * decay_factor
+
+
+def apply_exponential_decay(elo, days_since_fight, decay_rate, min_days=180):
+    """
+    Apply exponential decay to an Elo rating based on time since last fight.
+    
+    Formula: adjusted_elo = elo * exp(-decay_rate * days_since_fight)
+    
+    Only applies decay if days_since_fight >= min_days.
+    The decay is clamped to ensure the Elo doesn't go below 50% of original.
+    
+    Args:
+        elo: Current Elo rating
+        days_since_fight: Number of days since fighter's last fight
+        decay_rate: Decay rate per day (e.g., 0.001 = 0.1% per day)
+        min_days: Minimum days before decay starts (default 180)
+    
+    Returns:
+        float: Adjusted Elo rating after decay
+    """
+    import math
+    
+    if days_since_fight is None or days_since_fight < min_days:
+        return elo
+    
+    # Apply decay only to the days beyond min_days
+    effective_days = days_since_fight - min_days
+    decay_factor = math.exp(-decay_rate * effective_days)
+    
+    # Clamp to prevent excessive decay (minimum 50% of original)
+    decay_factor = max(0.5, decay_factor)
+    
+    return elo * decay_factor
+
+
+def apply_decay(elo, days_since_fight, decay_rate, min_days=180, decay_mode="none"):
+    """
+    Apply decay to an Elo rating based on the specified decay mode.
+    
+    Args:
+        elo: Current Elo rating
+        days_since_fight: Number of days since fighter's last fight
+        decay_rate: Decay rate per day
+        min_days: Minimum days before decay starts (default 180)
+        decay_mode: "linear", "exponential", or "none" (default "none")
+    
+    Returns:
+        float: Adjusted Elo rating after decay (or original if decay_mode is "none")
+    """
+    if decay_mode == "linear":
+        return apply_linear_decay(elo, days_since_fight, decay_rate, min_days)
+    elif decay_mode == "exponential":
+        return apply_exponential_decay(elo, days_since_fight, decay_rate, min_days)
+    else:
+        return elo
+
