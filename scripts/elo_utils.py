@@ -359,6 +359,11 @@ def build_fighter_weight_history(df):
     This function processes the DataFrame chronologically and builds a history
     of weight classes for each fighter based on their fight weights.
     
+    Note: When using weight_of_fight as a fallback for opponent weight, this
+    assumes both fighters competed at the same weight class. This assumption
+    may not be accurate for catchweight bouts or openweight fights. The weight
+    adjustment feature should be used with this limitation in mind.
+    
     Args:
         df: DataFrame with columns DATE, FIGHTER, opp_FIGHTER, weight_stat (or weight_of_fight)
             Must be sorted by DATE
@@ -380,9 +385,10 @@ def build_fighter_weight_history(df):
             w1 = row.get("weight_of_fight")
         
         # Get weight for fighter 2 (from opp_weight_stat or estimate from fight weight)
+        # Note: Using weight_of_fight as fallback assumes same weight class for both fighters
         w2 = row.get("opp_weight_stat")
         if pd.isna(w2):
-            w2 = row.get("weight_of_fight")  # Same fight = same weight class
+            w2 = row.get("weight_of_fight")  # Same fight = same weight class assumption
         
         # Convert to numeric if needed
         if w1 is not None and not pd.isna(w1):

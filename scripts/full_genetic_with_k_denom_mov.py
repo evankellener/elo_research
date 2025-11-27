@@ -164,6 +164,9 @@ def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, dra
             r2_adjusted = apply_decay(r2, days_since_f2, decay_rate, min_days, decay_mode)
         
         # Apply weight adjustment if enabled (Feature 2)
+        # Compute weight change data once and reuse for both precomp and postcomp
+        f1_moved_up = False
+        f2_moved_up = False
         if use_weight_adjust:
             # Get current weight for both fighters
             w1 = row.get("weight_stat")
@@ -205,17 +208,8 @@ def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, dra
         r2_new = r2 + k_eff * ((1 - res) - e2)
         
         # Apply weight adjustment postcomp bonus (Feature 2) if fighter won
+        # Uses the f1_moved_up/f2_moved_up values computed earlier
         if use_weight_adjust:
-            w1 = row.get("weight_stat")
-            if pd.isna(w1):
-                w1 = row.get("weight_of_fight")
-            w2 = row.get("opp_weight_stat")
-            if pd.isna(w2):
-                w2 = row.get("weight_of_fight")
-            
-            f1_moved_up, _, _ = detect_weight_change(f1, current_date, w1, weight_history)
-            f2_moved_up, _, _ = detect_weight_change(f2, current_date, w2, weight_history)
-            
             # Apply postcomp bonus for winning when moved up
             if f1_moved_up and res == 1:  # Fighter 1 won
                 r1_new *= weight_adjust_params["weight_up_postcomp_bonus"]
@@ -515,10 +509,11 @@ BASE_PARAM_BOUNDS = {
 }
 
 # Multiphase decay parameters (Feature 1)
+# Note: quick_succession_days max (89) < decay_days min (91) to avoid boundary overlap
 MULTIPHASE_DECAY_BOUNDS = {
-    "quick_succession_days": (7.0, 90.0),    # Days threshold for quick succession bump
+    "quick_succession_days": (7.0, 89.0),    # Days threshold for quick succession bump
     "quick_succession_bump": (1.00, 1.15),   # Multiplier for recent fighters (> 1.0 = boost)
-    "decay_days":            (90.0, 365.0),  # Days threshold for decay to start
+    "decay_days":            (91.0, 365.0),  # Days threshold for decay to start
     "multiphase_decay_rate": (0.0005, 0.015), # Exponential decay rate
 }
 
