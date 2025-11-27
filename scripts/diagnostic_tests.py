@@ -39,8 +39,10 @@ from full_genetic_with_k_denom_mov import (
     ga_search_params_roi,
     random_params,
     PARAM_BOUNDS,
+    get_param_bounds,
     build_bidirectional_odds_lookup,
     american_odds_to_decimal,
+    build_fighter_weight_history,
 )
 from elo_utils import add_bout_counts, build_fighter_history, has_prior_history
 
@@ -1019,9 +1021,45 @@ def main():
         help="Decay mode for Elo ratings: 'linear', 'exponential', or 'none' (default: none)"
     )
     
+    # New feature flags (for future integration with diagnostic tests)
+    parser.add_argument(
+        "--multiphase-decay", choices=["on", "off"], default="off",
+        dest="multiphase_decay",
+        help="Enable multiphase decay feature (default: off)"
+    )
+    parser.add_argument(
+        "--weight-adjust", choices=["on", "off"], default="off",
+        dest="weight_adjust",
+        help="Enable weight class adjustment feature (default: off)"
+    )
+    parser.add_argument(
+        "--optimize-elo-denom", choices=["on", "off"], default="off",
+        dest="optimize_elo_denom",
+        help="Enable Elo denominator optimization (default: off)"
+    )
+    
     args = parser.parse_args()
     
     verbose = not args.quiet
+    
+    # Convert on/off to boolean
+    multiphase_decay = args.multiphase_decay == "on"
+    weight_adjust = args.weight_adjust == "on"
+    optimize_elo_denom = args.optimize_elo_denom == "on"
+    
+    # Log active feature flags
+    if verbose:
+        active_features = []
+        if multiphase_decay:
+            active_features.append("multiphase-decay")
+        if weight_adjust:
+            active_features.append("weight-adjust")
+        if optimize_elo_denom:
+            active_features.append("optimize-elo-denom")
+        if active_features:
+            print(f"Active features: {', '.join(active_features)}")
+        else:
+            print("No advanced features active (baseline mode)")
     
     # Load data
     df, test_df, odds_df, test_odds_df = load_data()

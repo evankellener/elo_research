@@ -310,3 +310,172 @@ def apply_decay(elo, days_since_fight, decay_rate, min_days=180, decay_mode="non
     else:
         return elo
 
+
+def apply_multiphase_decay(elo, days_since_fight, quick_succession_days, quick_succession_bump,
+                            decay_days, decay_rate):
+    """
+    Apply multiphase decay adjustment to an Elo rating.
+    
+    Implements a piecewise function with two phases:
+    - Phase 1 (Quick Succession): If days_since_last_fight < quick_succession_days,
+      apply quick_succession_bump (positive multiplier > 1.0)
+    - Phase 2 (Decay): If days_since_last_fight > decay_days,
+      apply exponential decay penalty
+    - Between: No adjustment applied
+    
+    Args:
+        elo: Current Elo rating
+        days_since_fight: Number of days since fighter's last fight (None for debut)
+        quick_succession_days: Days threshold for quick succession bump
+        quick_succession_bump: Multiplier for recent fighters (> 1.0 = boost)
+        decay_days: Days threshold for decay to start
+        decay_rate: Exponential decay rate
+    
+    Returns:
+        float: Adjusted Elo rating
+    """
+    if days_since_fight is None:
+        return elo
+    
+    if days_since_fight < quick_succession_days:
+        # Phase 1: Quick succession bump
+        return elo * quick_succession_bump
+    elif days_since_fight > decay_days:
+        # Phase 2: Exponential decay
+        effective_days = days_since_fight - decay_days
+        decay_factor = math.exp(-decay_rate * effective_days)
+        # Clamp to prevent excessive decay (minimum 50% of original)
+        decay_factor = max(0.5, decay_factor)
+        return elo * decay_factor
+    else:
+        # Between: No adjustment
+        return elo
+
+
+def build_fighter_weight_history(df):
+    """
+    Build a dictionary tracking each fighter's weight class history over time.
+    
+    This function processes the DataFrame chronologically and builds a history
+    of weight classes for each fighter based on their fight weights.
+    
+    Note: When using weight_of_fight as a fallback for opponent weight, this
+    assumes both fighters competed at the same weight class. This assumption
+    may not be accurate for catchweight bouts or openweight fights. The weight
+    adjustment feature should be used with this limitation in mind.
+    
+    Args:
+        df: DataFrame with columns DATE, FIGHTER, opp_FIGHTER, weight_stat (or weight_of_fight)
+            Must be sorted by DATE
+    
+    Returns:
+        dict: Mapping of fighter name to list of (date, weight) tuples sorted by date
+    """
+    df = df.sort_values("DATE").copy()
+    weight_history = {}
+    
+    for _, row in df.iterrows():
+        date = row["DATE"]
+        f1 = row["FIGHTER"]
+        f2 = row["opp_FIGHTER"]
+        
+        # Get weight for fighter 1
+        w1 = row.get("weight_stat")
+        if pd.isna(w1):
+            w1 = row.get("weight_of_fight")
+        
+        # Get weight for fighter 2 (from opp_weight_stat or estimate from fight weight)
+        # Note: Using weight_of_fight as fallback assumes same weight class for both fighters
+        w2 = row.get("opp_weight_stat")
+        if pd.isna(w2):
+            w2 = row.get("weight_of_fight")  # Same fight = same weight class assumption
+        
+        # Convert to numeric if needed
+        if w1 is not None and not pd.isna(w1):
+            try:
+                w1 = float(w1)
+                if f1 not in weight_history:
+                    weight_history[f1] = []
+                weight_history[f1].append((date, w1))
+            except (ValueError, TypeError):
+                pass
+        
+        if w2 is not None and not pd.isna(w2):
+            try:
+                w2 = float(w2)
+                if f2 not in weight_history:
+                    weight_history[f2] = []
+                weight_history[f2].append((date, w2))
+            except (ValueError, TypeError):
+                pass
+    
+    return weight_history
+
+
+def detect_weight_change(fighter, current_date, current_weight, weight_history):
+    """
+    Detect if a fighter has moved weight classes.
+    
+    Args:
+        fighter: Fighter name
+        current_date: Date of current fight
+        current_weight: Weight class of current fight
+        weight_history: Dict from build_fighter_weight_history()
+    
+    Returns:
+        tuple: (moved_up, moved_down, previous_weight)
+            moved_up: True if fighter moved to higher weight class
+            moved_down: True if fighter moved to lower weight class
+            previous_weight: The previous weight class (or None if debut)
+    """
+    if fighter not in weight_history:
+        return False, False, None
+    
+    history = weight_history[fighter]
+    
+    # Find the most recent fight before current_date
+    previous_weight = None
+    for date, weight in reversed(history):
+        if date < current_date:
+            previous_weight = weight
+            break
+    
+    if previous_weight is None:
+        return False, False, None
+    
+    # Compare weights (higher number = heavier weight class)
+    if current_weight is None:
+        return False, False, previous_weight
+    
+    try:
+        current_w = float(current_weight)
+        prev_w = float(previous_weight)
+        
+        moved_up = current_w > prev_w
+        moved_down = current_w < prev_w
+        
+        return moved_up, moved_down, previous_weight
+    except (ValueError, TypeError):
+        return False, False, previous_weight
+
+
+def calculate_expected_value(rating1, rating2, elo_denom=400):
+    """
+    Calculate expected score for a player with rating1 against rating2.
+    
+    Standard Elo formula: E1 = 1 / (1 + 10^((R2 - R1) / elo_denom))
+    
+    The elo_denom parameter (default 400) controls the sensitivity of the
+    expected value to rating differences. Lower values make ratings more
+    sensitive to differences.
+    
+    Args:
+        rating1: Player 1's rating
+        rating2: Player 2's rating
+        elo_denom: Denominator in the Elo formula (default 400)
+    
+    Returns:
+        float: Expected score for player 1 (between 0 and 1)
+    """
+    return 1.0 / (1.0 + 10.0 ** ((rating2 - rating1) / elo_denom))
+
