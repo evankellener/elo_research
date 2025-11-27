@@ -5,7 +5,10 @@ import numpy as np
 import unicodedata
 from multiprocessing import Pool, cpu_count
 from functools import partial
-from elo_utils import mov_factor, build_fighter_history, has_prior_history, add_bout_counts, apply_decay
+from elo_utils import (
+    mov_factor, build_fighter_history, has_prior_history, add_bout_counts, apply_decay,
+    apply_multiphase_decay, build_fighter_weight_history, detect_weight_change, calculate_expected_value
+)
 
 
 def normalize_name(name):
@@ -62,7 +65,8 @@ def find_fighter_match(test_name, training_names):
 
 
 def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, draw_k_factor=0.5,
-                  decay_mode="none", decay_rate=0.0, min_days=180):
+                  decay_mode="none", decay_rate=0.0, min_days=180,
+                  multiphase_decay_params=None, weight_adjust_params=None, weight_history=None):
     """
     Core Elo engine, with optional method of victory multipliers and decay.
     
@@ -70,12 +74,21 @@ def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, dra
         df: DataFrame with fight data
         k: Base K-factor (default 32)
         base_elo: Starting Elo rating (default 1500)
-        denominator: Elo denominator (default 400)
+        denominator: Elo denominator (default 400) - can be optimized with --optimize-elo-denom
         mov_params: Dict with MoV weights, or None for no adjustment
         draw_k_factor: Multiplier for K-factor in draws (default 0.5)
         decay_mode: "linear", "exponential", or "none" (default "none")
         decay_rate: Decay rate per day (default 0.0)
         min_days: Minimum days before decay starts (default 180)
+        multiphase_decay_params: Dict with multiphase decay parameters or None:
+            - quick_succession_days: Days threshold for quick succession bump
+            - quick_succession_bump: Multiplier for recent fighters (> 1.0 = boost)
+            - decay_days: Days threshold for decay to start
+            - multiphase_decay_rate: Exponential decay rate
+        weight_adjust_params: Dict with weight adjustment parameters or None:
+            - weight_up_precomp_penalty: Penalty for moving up in weight (< 1.0)
+            - weight_up_postcomp_bonus: Bonus for winning in higher weight class
+        weight_history: Pre-built fighter weight history (from build_fighter_weight_history)
     
     Note: Assumes df is sorted by DATE. If not, results may be incorrect.
     
@@ -91,8 +104,12 @@ def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, dra
     last_fight_dates = {}  # Track last fight date for each fighter
     pre, post, opp_pre, opp_post = [], [], [], []
     adjusted_pre, adjusted_opp_pre = [], []  # Track decay-adjusted precomp_elo
+    
+    # Check which features are enabled
+    use_multiphase_decay = multiphase_decay_params is not None
+    use_weight_adjust = weight_adjust_params is not None and weight_history is not None
 
-    for _, row in df.iterrows():
+    for idx, row in df.iterrows():
         f1, f2, res = row["FIGHTER"], row["opp_FIGHTER"], row["result"]
         current_date = row.get("DATE")
         
@@ -112,26 +129,63 @@ def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, dra
         r1_adjusted = r1
         r2_adjusted = r2
         
-        if decay_mode != "none" and current_date is not None and decay_rate > 0:
-            # Calculate days since last fight for each fighter
-            last_date_f1 = last_fight_dates.get(f1)
-            last_date_f2 = last_fight_dates.get(f2)
-            
-            days_since_f1 = None
-            days_since_f2 = None
-            
+        # Calculate days since last fight for each fighter
+        last_date_f1 = last_fight_dates.get(f1)
+        last_date_f2 = last_fight_dates.get(f2)
+        
+        days_since_f1 = None
+        days_since_f2 = None
+        
+        if current_date is not None:
             if last_date_f1 is not None:
                 days_since_f1 = (current_date - last_date_f1).days
             if last_date_f2 is not None:
                 days_since_f2 = (current_date - last_date_f2).days
-            
-            # Apply decay to get adjusted ratings for prediction
+        
+        # Apply multiphase decay if enabled (Feature 1)
+        if use_multiphase_decay and current_date is not None:
+            r1_adjusted = apply_multiphase_decay(
+                r1_adjusted, days_since_f1,
+                multiphase_decay_params["quick_succession_days"],
+                multiphase_decay_params["quick_succession_bump"],
+                multiphase_decay_params["decay_days"],
+                multiphase_decay_params["multiphase_decay_rate"]
+            )
+            r2_adjusted = apply_multiphase_decay(
+                r2_adjusted, days_since_f2,
+                multiphase_decay_params["quick_succession_days"],
+                multiphase_decay_params["quick_succession_bump"],
+                multiphase_decay_params["decay_days"],
+                multiphase_decay_params["multiphase_decay_rate"]
+            )
+        # Apply standard decay if enabled (legacy mode)
+        elif decay_mode != "none" and current_date is not None and decay_rate > 0:
             r1_adjusted = apply_decay(r1, days_since_f1, decay_rate, min_days, decay_mode)
             r2_adjusted = apply_decay(r2, days_since_f2, decay_rate, min_days, decay_mode)
+        
+        # Apply weight adjustment if enabled (Feature 2)
+        if use_weight_adjust:
+            # Get current weight for both fighters
+            w1 = row.get("weight_stat")
+            if pd.isna(w1):
+                w1 = row.get("weight_of_fight")
+            w2 = row.get("opp_weight_stat")
+            if pd.isna(w2):
+                w2 = row.get("weight_of_fight")
+            
+            # Detect weight changes
+            f1_moved_up, _, _ = detect_weight_change(f1, current_date, w1, weight_history)
+            f2_moved_up, _, _ = detect_weight_change(f2, current_date, w2, weight_history)
+            
+            # Apply precomp penalty for moving up
+            if f1_moved_up:
+                r1_adjusted *= weight_adjust_params["weight_up_precomp_penalty"]
+            if f2_moved_up:
+                r2_adjusted *= weight_adjust_params["weight_up_precomp_penalty"]
 
         # Base expected scores (use adjusted ratings for prediction)
-        e1 = 1.0 / (1.0 + 10.0 ** ((r2_adjusted - r1_adjusted) / denominator))
-        e2 = 1.0 / (1.0 + 10.0 ** ((r1_adjusted - r2_adjusted) / denominator))
+        e1 = calculate_expected_value(r1_adjusted, r2_adjusted, denominator)
+        e2 = calculate_expected_value(r2_adjusted, r1_adjusted, denominator)
 
         # Method of victory factor
         if mov_params is not None:
@@ -149,6 +203,24 @@ def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, dra
         # Decay only affects predictions, not the stored postcomp_elo
         r1_new = r1 + k_eff * (res - e1)
         r2_new = r2 + k_eff * ((1 - res) - e2)
+        
+        # Apply weight adjustment postcomp bonus (Feature 2) if fighter won
+        if use_weight_adjust:
+            w1 = row.get("weight_stat")
+            if pd.isna(w1):
+                w1 = row.get("weight_of_fight")
+            w2 = row.get("opp_weight_stat")
+            if pd.isna(w2):
+                w2 = row.get("weight_of_fight")
+            
+            f1_moved_up, _, _ = detect_weight_change(f1, current_date, w1, weight_history)
+            f2_moved_up, _, _ = detect_weight_change(f2, current_date, w2, weight_history)
+            
+            # Apply postcomp bonus for winning when moved up
+            if f1_moved_up and res == 1:  # Fighter 1 won
+                r1_new *= weight_adjust_params["weight_up_postcomp_bonus"]
+            if f2_moved_up and res == 0:  # Fighter 2 won
+                r2_new *= weight_adjust_params["weight_up_postcomp_bonus"]
 
         ratings[f1], ratings[f2] = r1_new, r2_new
         
@@ -172,8 +244,8 @@ def run_basic_elo(df, k=32, base_elo=1500, denominator=400, mov_params=None, dra
     df["opp_precomp_elo"] = opp_pre
     df["opp_postcomp_elo"] = opp_post
     
-    # Add adjusted precomp_elo columns if decay is enabled
-    if decay_mode != "none":
+    # Add adjusted precomp_elo columns if any adjustment was applied
+    if decay_mode != "none" or use_multiphase_decay or use_weight_adjust:
         df["adjusted_precomp_elo"] = adjusted_pre
         df["adjusted_opp_precomp_elo"] = adjusted_opp_pre
     
@@ -430,7 +502,8 @@ def _calculate_oos_accuracy_worker(args):
     )
     return params_dict["index"], oos_acc
 
-PARAM_BOUNDS = {
+# Base parameter bounds (always included)
+BASE_PARAM_BOUNDS = {
     "k":          (10.0, 500.0),
     "w_ko":       (1.0, 2.0),
     "w_sub":      (1.0, 2.0),
@@ -441,38 +514,115 @@ PARAM_BOUNDS = {
     "min_days":   (0, 365),       # Minimum days before decay starts
 }
 
+# Multiphase decay parameters (Feature 1)
+MULTIPHASE_DECAY_BOUNDS = {
+    "quick_succession_days": (7.0, 90.0),    # Days threshold for quick succession bump
+    "quick_succession_bump": (1.00, 1.15),   # Multiplier for recent fighters (> 1.0 = boost)
+    "decay_days":            (90.0, 365.0),  # Days threshold for decay to start
+    "multiphase_decay_rate": (0.0005, 0.015), # Exponential decay rate
+}
 
-def random_param_value(key):
-    lo, hi = PARAM_BOUNDS[key]
+# Weight change parameters (Feature 2)
+WEIGHT_ADJUST_BOUNDS = {
+    "weight_up_precomp_penalty":  (0.80, 0.98),  # Penalty for moving up in weight (< 1.0)
+    "weight_up_postcomp_bonus":   (1.05, 1.25),  # Bonus for winning in higher weight class
+}
+
+# Elo denomination parameter (Feature 3)
+ELO_DENOM_BOUNDS = {
+    "elo_denom": (200.0, 800.0),  # The denominator in Elo expected value calculation
+}
+
+# Default PARAM_BOUNDS for backward compatibility
+PARAM_BOUNDS = BASE_PARAM_BOUNDS.copy()
+
+
+def get_param_bounds(multiphase_decay=False, weight_adjust=False, optimize_elo_denom=False):
+    """
+    Get parameter bounds based on active feature flags.
+    
+    Args:
+        multiphase_decay: If True, includes multiphase decay parameters
+        weight_adjust: If True, includes weight adjustment parameters
+        optimize_elo_denom: If True, includes elo_denom parameter
+    
+    Returns:
+        dict: Parameter bounds for GA optimization
+    """
+    bounds = BASE_PARAM_BOUNDS.copy()
+    
+    if multiphase_decay:
+        bounds.update(MULTIPHASE_DECAY_BOUNDS)
+    
+    if weight_adjust:
+        bounds.update(WEIGHT_ADJUST_BOUNDS)
+    
+    if optimize_elo_denom:
+        bounds.update(ELO_DENOM_BOUNDS)
+    
+    return bounds
+
+
+def random_param_value(key, param_bounds=None):
+    if param_bounds is None:
+        param_bounds = PARAM_BOUNDS
+    lo, hi = param_bounds[key]
     return random.uniform(lo, hi)
 
 
-def random_params(include_decay=False):
+def random_params(include_decay=False, multiphase_decay=False, weight_adjust=False, 
+                  optimize_elo_denom=False, param_bounds=None):
     """
     Generate random parameter values for GA optimization.
     
     Args:
         include_decay: If True, includes decay_rate and min_days parameters
+        multiphase_decay: If True, includes multiphase decay parameters
+        weight_adjust: If True, includes weight adjustment parameters
+        optimize_elo_denom: If True, includes elo_denom parameter
+        param_bounds: Optional custom parameter bounds dict
     
     Returns:
         dict: Random parameter values
     """
+    if param_bounds is None:
+        param_bounds = get_param_bounds(multiphase_decay, weight_adjust, optimize_elo_denom)
+    
     params = {
-        "k":      random_param_value("k"),
-        "w_ko":   random_param_value("w_ko"),
-        "w_sub":  random_param_value("w_sub"),
-        "w_udec": random_param_value("w_udec"),
-        "w_sdec": random_param_value("w_sdec"),
-        "w_mdec": random_param_value("w_mdec"),
+        "k":      random_param_value("k", param_bounds),
+        "w_ko":   random_param_value("w_ko", param_bounds),
+        "w_sub":  random_param_value("w_sub", param_bounds),
+        "w_udec": random_param_value("w_udec", param_bounds),
+        "w_sdec": random_param_value("w_sdec", param_bounds),
+        "w_mdec": random_param_value("w_mdec", param_bounds),
     }
+    
     if include_decay:
-        params["decay_rate"] = random_param_value("decay_rate")
-        params["min_days"] = int(random_param_value("min_days"))
+        params["decay_rate"] = random_param_value("decay_rate", param_bounds)
+        params["min_days"] = int(random_param_value("min_days", param_bounds))
+    
+    if multiphase_decay:
+        params["quick_succession_days"] = random_param_value("quick_succession_days", param_bounds)
+        params["quick_succession_bump"] = random_param_value("quick_succession_bump", param_bounds)
+        params["decay_days"] = random_param_value("decay_days", param_bounds)
+        params["multiphase_decay_rate"] = random_param_value("multiphase_decay_rate", param_bounds)
+    
+    if weight_adjust:
+        params["weight_up_precomp_penalty"] = random_param_value("weight_up_precomp_penalty", param_bounds)
+        params["weight_up_postcomp_bonus"] = random_param_value("weight_up_postcomp_bonus", param_bounds)
+    
+    if optimize_elo_denom:
+        params["elo_denom"] = random_param_value("elo_denom", param_bounds)
+    
     return params
 
 
-def clip_param(key, value):
-    lo, hi = PARAM_BOUNDS[key]
+def clip_param(key, value, param_bounds=None):
+    if param_bounds is None:
+        param_bounds = PARAM_BOUNDS
+    if key not in param_bounds:
+        return value
+    lo, hi = param_bounds[key]
     return max(lo, min(hi, value))
 
 
@@ -763,7 +913,9 @@ def compute_extended_roi_metrics(bet_records):
     }
 
 
-def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=False, decay_mode="none"):
+def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=False, decay_mode="none",
+                        multiphase_decay=False, weight_adjust=False, optimize_elo_denom=False,
+                        weight_history=None):
     """
     Run Elo with given params and return ROI% for fights with available odds.
     
@@ -780,6 +932,10 @@ def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=Fa
                        Set to 0 or None to use all fights with available odds
         return_extended: If True, return dict with extended metrics instead of just ROI
         decay_mode: "linear", "exponential", or "none" (default "none")
+        multiphase_decay: If True, use multiphase decay parameters from params
+        weight_adjust: If True, use weight adjustment parameters from params
+        optimize_elo_denom: If True, use elo_denom parameter from params
+        weight_history: Pre-built fighter weight history (from build_fighter_weight_history)
     
     Returns:
         If return_extended=False: float: ROI percentage (0 if no valid bets)
@@ -799,9 +955,35 @@ def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=Fa
     decay_rate = params.get("decay_rate", 0.0)
     min_days = params.get("min_days", 180)
     
+    # Get elo_denom if optimize_elo_denom is enabled (Feature 3)
+    elo_denom = params.get("elo_denom", 400) if optimize_elo_denom else 400
+    
+    # Prepare multiphase decay params (Feature 1)
+    multiphase_decay_params = None
+    if multiphase_decay:
+        multiphase_decay_params = {
+            "quick_succession_days": params.get("quick_succession_days", 30),
+            "quick_succession_bump": params.get("quick_succession_bump", 1.05),
+            "decay_days": params.get("decay_days", 180),
+            "multiphase_decay_rate": params.get("multiphase_decay_rate", 0.002),
+        }
+    
+    # Prepare weight adjust params (Feature 2)
+    weight_adjust_params = None
+    if weight_adjust:
+        weight_adjust_params = {
+            "weight_up_precomp_penalty": params.get("weight_up_precomp_penalty", 0.95),
+            "weight_up_postcomp_bonus": params.get("weight_up_postcomp_bonus", 1.10),
+        }
+    
     # Train Elo on ALL historical data
-    df_with_elo = run_basic_elo(df.copy(), k=k, mov_params=mov_params,
-                                 decay_mode=decay_mode, decay_rate=decay_rate, min_days=min_days)
+    df_with_elo = run_basic_elo(
+        df.copy(), k=k, mov_params=mov_params, denominator=elo_denom,
+        decay_mode=decay_mode, decay_rate=decay_rate, min_days=min_days,
+        multiphase_decay_params=multiphase_decay_params,
+        weight_adjust_params=weight_adjust_params,
+        weight_history=weight_history
+    )
     
     # Filter to recent fights if lookback_days is specified (>0)
     if lookback_days and lookback_days > 0:
@@ -964,6 +1146,9 @@ def ga_search_params_roi(
     verbose=True,
     fitness_weights=None,
     decay_mode="none",
+    multiphase_decay=False,
+    weight_adjust=False,
+    optimize_elo_denom=False,
 ):
     """
     Full GA search over k and method of victory weights using ROI as fitness.
@@ -991,6 +1176,9 @@ def ga_search_params_roi(
                         If None, uses ROI only. Values are normalized internally.
         decay_mode: "linear", "exponential", or "none" (default "none")
                     If not "none", decay_rate and min_days will be included in optimization
+        multiphase_decay: If True, use multiphase decay feature (--multiphase-decay on)
+        weight_adjust: If True, use weight adjustment feature (--weight-adjust on)
+        optimize_elo_denom: If True, optimize elo_denom parameter (--optimize-elo-denom on)
     
     Returns:
         If return_all_results=False: best_params, best_fitness
@@ -998,8 +1186,20 @@ def ga_search_params_roi(
     """
     include_decay = decay_mode != "none"
     
+    # Get parameter bounds based on active features
+    param_bounds = get_param_bounds(multiphase_decay, weight_adjust, optimize_elo_denom)
+    
     if seed is not None:
         random.seed(seed)
+    
+    # Build weight history if weight_adjust is enabled
+    weight_history = None
+    if weight_adjust:
+        if verbose:
+            print("Building fighter weight history for weight adjustment feature...")
+        weight_history = build_fighter_weight_history(df)
+        if verbose:
+            print(f"  Built weight history for {len(weight_history)} fighters")
     
     # Prepare odds data
     odds_df = odds_df.copy()
@@ -1034,6 +1234,19 @@ def ga_search_params_roi(
             print(f"Multi-objective fitness weights: {fitness_weights}")
         if decay_mode != "none":
             print(f"Decay mode: {decay_mode} (optimizing decay_rate and min_days)")
+        
+        # Log active feature flags
+        active_features = []
+        if multiphase_decay:
+            active_features.append("multiphase-decay")
+        if weight_adjust:
+            active_features.append("weight-adjust")
+        if optimize_elo_denom:
+            active_features.append("optimize-elo-denom")
+        if active_features:
+            print(f"Active features: {', '.join(active_features)}")
+        else:
+            print("No advanced features active (baseline mode)")
     
     all_results = []
     
@@ -1061,15 +1274,23 @@ def ga_search_params_roi(
     
     def evaluate_individual(params):
         """Evaluate params and return fitness plus extended metrics."""
-        extended = evaluate_params_roi(df, odds_df, params, lookback_days=lookback_days, 
-                                        return_extended=True, decay_mode=decay_mode)
+        extended = evaluate_params_roi(
+            df, odds_df, params, lookback_days=lookback_days, 
+            return_extended=True, decay_mode=decay_mode,
+            multiphase_decay=multiphase_decay, weight_adjust=weight_adjust,
+            optimize_elo_denom=optimize_elo_denom, weight_history=weight_history
+        )
         fitness = compute_fitness(extended)
         return fitness, extended
     
     # Initialize population with diverse parameters
     population = []
     for i in range(population_size):
-        p = random_params(include_decay=include_decay)
+        p = random_params(
+            include_decay=include_decay, multiphase_decay=multiphase_decay,
+            weight_adjust=weight_adjust, optimize_elo_denom=optimize_elo_denom,
+            param_bounds=param_bounds
+        )
         fitness, extended = evaluate_individual(p)
         population.append({"params": p, "fitness": fitness, "extended": extended})
     
@@ -1100,8 +1321,16 @@ def ga_search_params_roi(
         while len(new_population) < population_size:
             parent1 = tournament_select(population)
             parent2 = tournament_select(population)
-            child_params = crossover(parent1, parent2, include_decay=include_decay)
-            child_params = mutate(child_params, include_decay=include_decay)
+            child_params = crossover(
+                parent1, parent2, include_decay=include_decay,
+                multiphase_decay=multiphase_decay, weight_adjust=weight_adjust,
+                optimize_elo_denom=optimize_elo_denom
+            )
+            child_params = mutate(
+                child_params, include_decay=include_decay,
+                multiphase_decay=multiphase_decay, weight_adjust=weight_adjust,
+                optimize_elo_denom=optimize_elo_denom, param_bounds=param_bounds
+            )
             
             fitness, extended = evaluate_individual(child_params)
             new_population.append({"params": child_params, "fitness": fitness, "extended": extended})
@@ -1326,7 +1555,8 @@ def tournament_select(population, k_tour=3):
     return contenders[0]
 
 
-def crossover(parent1, parent2, crossover_rate=0.5, include_decay=False):
+def crossover(parent1, parent2, crossover_rate=0.5, include_decay=False,
+              multiphase_decay=False, weight_adjust=False, optimize_elo_denom=False):
     """
     Simple crossover.
     For each param, with probability crossover_rate take average, else take one parent.
@@ -1336,9 +1566,12 @@ def crossover(parent1, parent2, crossover_rate=0.5, include_decay=False):
         parent2: Second parent individual
         crossover_rate: Probability of averaging vs taking from one parent
         include_decay: If True, includes decay_rate and min_days in crossover
+        multiphase_decay: If True, includes multiphase decay parameters
+        weight_adjust: If True, includes weight adjustment parameters
+        optimize_elo_denom: If True, includes elo_denom parameter
     """
     child_params = {}
-    # Determine which keys to process
+    # Determine which keys to process (use all keys from parent1)
     keys_to_process = set(parent1["params"].keys())
     if not include_decay:
         keys_to_process -= {"decay_rate", "min_days"}
@@ -1365,7 +1598,9 @@ def crossover(parent1, parent2, crossover_rate=0.5, include_decay=False):
     return child_params
 
 
-def mutate(params, mutation_rate=0.3, mutation_scale=0.1, include_decay=False):
+def mutate(params, mutation_rate=0.3, mutation_scale=0.1, include_decay=False,
+           multiphase_decay=False, weight_adjust=False, optimize_elo_denom=False,
+           param_bounds=None):
     """
     Gaussian mutation: for each param, with probability mutation_rate,
     add noise proportional to range * mutation_scale.
@@ -1375,24 +1610,31 @@ def mutate(params, mutation_rate=0.3, mutation_scale=0.1, include_decay=False):
         mutation_rate: Probability of mutating each parameter
         mutation_scale: Scale factor for Gaussian noise
         include_decay: If True, includes decay_rate and min_days in mutation
+        multiphase_decay: If True, includes multiphase decay parameters
+        weight_adjust: If True, includes weight adjustment parameters
+        optimize_elo_denom: If True, includes elo_denom parameter
+        param_bounds: Custom parameter bounds dict (if None, uses get_param_bounds)
     """
+    if param_bounds is None:
+        param_bounds = get_param_bounds(multiphase_decay, weight_adjust, optimize_elo_denom)
+    
     new_params = params.copy()
     mutated = False
     
-    # Determine which keys to mutate
+    # Determine which keys to mutate (all keys present in params that have bounds)
     keys_to_mutate = set(new_params.keys())
     if not include_decay:
         keys_to_mutate -= {"decay_rate", "min_days"}
     
     for key in keys_to_mutate:
-        if key not in PARAM_BOUNDS:
+        if key not in param_bounds:
             continue
         if random.random() < mutation_rate:
-            lo, hi = PARAM_BOUNDS[key]
+            lo, hi = param_bounds[key]
             span = hi - lo
             noise = random.gauss(0.0, mutation_scale * span)
             new_val = new_params[key] + noise
-            new_val = clip_param(key, new_val)
+            new_val = clip_param(key, new_val, param_bounds)
             # Ensure min_days is an integer
             if key == "min_days":
                 new_val = int(new_val)
@@ -1401,14 +1643,14 @@ def mutate(params, mutation_rate=0.3, mutation_scale=0.1, include_decay=False):
     
     # Ensure at least one parameter is mutated to maintain diversity
     if not mutated and random.random() < 0.5:
-        valid_keys = [k for k in keys_to_mutate if k in PARAM_BOUNDS]
+        valid_keys = [k for k in keys_to_mutate if k in param_bounds]
         if valid_keys:
             key = random.choice(valid_keys)
-            lo, hi = PARAM_BOUNDS[key]
+            lo, hi = param_bounds[key]
             span = hi - lo
             noise = random.gauss(0.0, mutation_scale * span)
             new_val = new_params[key] + noise
-            new_val = clip_param(key, new_val)
+            new_val = clip_param(key, new_val, param_bounds)
             if key == "min_days":
                 new_val = int(new_val)
             new_params[key] = new_val
@@ -1656,7 +1898,27 @@ if __name__ == "__main__":
                         help="Decay mode for Elo ratings: 'linear', 'exponential', or 'none' (default: none). "
                              "When set to 'linear' or 'exponential', decay_rate and min_days will be "
                              "included in GA optimization.")
+    
+    # New feature flags
+    parser.add_argument("--multiphase-decay", choices=["on", "off"], default="off",
+                        dest="multiphase_decay",
+                        help="Enable multiphase decay feature (default: off). "
+                             "Implements piecewise decay with quick succession bump and exponential decay.")
+    parser.add_argument("--weight-adjust", choices=["on", "off"], default="off",
+                        dest="weight_adjust",
+                        help="Enable weight class adjustment feature (default: off). "
+                             "Applies penalty for moving up in weight class and bonus for winning.")
+    parser.add_argument("--optimize-elo-denom", choices=["on", "off"], default="off",
+                        dest="optimize_elo_denom",
+                        help="Enable Elo denominator optimization (default: off). "
+                             "Makes the '400' constant in Elo equation a GA-optimizable variable.")
+    
     args = parser.parse_args()
+    
+    # Convert on/off to boolean
+    multiphase_decay = args.multiphase_decay == "on"
+    weight_adjust = args.weight_adjust == "on"
+    optimize_elo_denom = args.optimize_elo_denom == "on"
     
     df = pd.read_csv("data/interleaved_cleaned.csv", low_memory=False)
     test_df = pd.read_csv("data/past3_events.csv", low_memory=False)
@@ -1679,7 +1941,9 @@ if __name__ == "__main__":
     print(f"Test data date range: {test_df['date'].min()} to {test_df['date'].max()}")
     print(f"Running in mode: {args.mode}")
     print(f"Decay mode: {args.decay_mode}")
-    print(f"Mode check: args.mode == 'roi' is {args.mode == 'roi'}")
+    
+    # Log active feature flags
+    print(f"Feature flags: multiphase-decay={args.multiphase_decay}, weight-adjust={args.weight_adjust}, optimize-elo-denom={args.optimize_elo_denom}")
 
     if args.mode == "roi":
         print("\n" + "="*60)
@@ -1721,6 +1985,9 @@ if __name__ == "__main__":
             lookback_days=args.lookback_days,
             seed=args.seed,
             decay_mode=args.decay_mode,
+            multiphase_decay=multiphase_decay,
+            weight_adjust=weight_adjust,
+            optimize_elo_denom=optimize_elo_denom,
         )
 
         print("\n=== GA best params (ROI-optimized) ===")
@@ -1741,13 +2008,41 @@ if __name__ == "__main__":
         best_k = best_params["k"]
         best_decay_rate = best_params.get("decay_rate", 0.0)
         best_min_days = best_params.get("min_days", 180)
+        
+        # Get elo_denom from best params if optimize_elo_denom was enabled
+        best_elo_denom = best_params.get("elo_denom", 400) if optimize_elo_denom else 400
+        
+        # Prepare multiphase decay params if feature was enabled
+        best_multiphase_decay_params = None
+        if multiphase_decay:
+            best_multiphase_decay_params = {
+                "quick_succession_days": best_params.get("quick_succession_days", 30),
+                "quick_succession_bump": best_params.get("quick_succession_bump", 1.05),
+                "decay_days": best_params.get("decay_days", 180),
+                "multiphase_decay_rate": best_params.get("multiphase_decay_rate", 0.002),
+            }
+        
+        # Prepare weight adjust params if feature was enabled
+        best_weight_adjust_params = None
+        weight_history = None
+        if weight_adjust:
+            best_weight_adjust_params = {
+                "weight_up_precomp_penalty": best_params.get("weight_up_precomp_penalty", 0.95),
+                "weight_up_postcomp_bonus": best_params.get("weight_up_postcomp_bonus", 1.10),
+            }
+            # Build weight history for the training data
+            weight_history = build_fighter_weight_history(df)
 
         # Use ALL data before the test dates for final training
         test_start_date = pd.to_datetime(test_df["date"]).min()
         df_train_all = df[df["DATE"] < test_start_date].copy()
-        df_trained = run_basic_elo(df_train_all, k=best_k, mov_params=mov_params,
-                                   decay_mode=args.decay_mode, decay_rate=best_decay_rate, 
-                                   min_days=best_min_days)
+        df_trained = run_basic_elo(
+            df_train_all, k=best_k, mov_params=mov_params, denominator=best_elo_denom,
+            decay_mode=args.decay_mode, decay_rate=best_decay_rate, min_days=best_min_days,
+            multiphase_decay_params=best_multiphase_decay_params,
+            weight_adjust_params=best_weight_adjust_params,
+            weight_history=weight_history
+        )
 
         # OOS ROI evaluation on past 3 events
         # Use test_df as the odds source for OOS evaluation (it has avg_odds column)
