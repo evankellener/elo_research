@@ -245,7 +245,8 @@ def apply_linear_decay(precomp_elo, days_since_fight, decay_rate, min_days=180, 
     """
     Apply linear decay to Elo rating based on time since last fight.
     
-    Linear decay formula: adjusted_elo = precomp_elo * (1 - decay_rate * days_since_fight)
+    Linear decay formula: adjusted_elo = precomp_elo * (1 - decay_rate * effective_days)
+    where effective_days = days_since_fight - min_days
     
     The decay only applies if days_since_fight >= min_days.
     The adjusted Elo cannot go below base_elo to prevent unreasonable ratings.
@@ -282,7 +283,8 @@ def apply_exponential_decay(precomp_elo, days_since_fight, decay_rate, min_days=
     """
     Apply exponential decay to Elo rating based on time since last fight.
     
-    Exponential decay formula: adjusted_elo = precomp_elo * exp(-decay_rate * days_since_fight)
+    Exponential decay formula: adjusted_elo = precomp_elo * exp(-decay_rate * effective_days)
+    where effective_days = days_since_fight - min_days
     
     The decay only applies if days_since_fight >= min_days.
     The adjusted Elo cannot go below base_elo to prevent unreasonable ratings.
