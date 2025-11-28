@@ -265,12 +265,18 @@ def run_config(config, script_path, seed, generations, population, timeout=600):
     # Print best parameters if available
     if result['best_params']:
         params = result['best_params']
-        print(f"  Best Params: k={params.get('k', 'N/A'):.2f}, " +
-              f"w_ko={params.get('w_ko', 'N/A'):.4f}, " +
-              f"w_sub={params.get('w_sub', 'N/A'):.4f}, " +
-              f"w_udec={params.get('w_udec', 'N/A'):.4f}, " +
-              f"w_sdec={params.get('w_sdec', 'N/A'):.4f}, " +
-              f"w_mdec={params.get('w_mdec', 'N/A'):.4f}")
+        k_str = format_value(params.get('k'), '.2f')
+        w_ko_str = format_value(params.get('w_ko'), '.4f')
+        w_sub_str = format_value(params.get('w_sub'), '.4f')
+        w_udec_str = format_value(params.get('w_udec'), '.4f')
+        w_sdec_str = format_value(params.get('w_sdec'), '.4f')
+        w_mdec_str = format_value(params.get('w_mdec'), '.4f')
+        print(f"  Best Params: k={k_str}, " +
+              f"w_ko={w_ko_str}, " +
+              f"w_sub={w_sub_str}, " +
+              f"w_udec={w_udec_str}, " +
+              f"w_sdec={w_sdec_str}, " +
+              f"w_mdec={w_mdec_str}")
     
     return result
 
