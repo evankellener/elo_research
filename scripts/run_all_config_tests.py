@@ -25,6 +25,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import random
 import re
@@ -143,14 +144,28 @@ def parse_subprocess_output(output):
     # Look for patterns like: {'k': 123.45, 'w_ko': 1.23, ...}
     best_params = {}
     
-    # Pattern for individual parameters
+    # Pattern for individual parameters - capture full decimal precision
+    # Base parameters (always present)
     param_patterns = {
-        'k': r"'k'[:\s]+(\d+\.?\d*)",
-        'w_ko': r"'w_ko'[:\s]+(\d+\.?\d*)",
-        'w_sub': r"'w_sub'[:\s]+(\d+\.?\d*)",
-        'w_udec': r"'w_udec'[:\s]+(\d+\.?\d*)",
-        'w_sdec': r"'w_sdec'[:\s]+(\d+\.?\d*)",
-        'w_mdec': r"'w_mdec'[:\s]+(\d+\.?\d*)",
+        'k': r"'k'[:\s]+(\d+(?:\.\d+)?)",
+        'w_ko': r"'w_ko'[:\s]+(\d+(?:\.\d+)?)",
+        'w_sub': r"'w_sub'[:\s]+(\d+(?:\.\d+)?)",
+        'w_udec': r"'w_udec'[:\s]+(\d+(?:\.\d+)?)",
+        'w_sdec': r"'w_sdec'[:\s]+(\d+(?:\.\d+)?)",
+        'w_mdec': r"'w_mdec'[:\s]+(\d+(?:\.\d+)?)",
+        # Multiphase decay parameters (if enabled)
+        'quick_succession_days': r"'quick_succession_days'[:\s]+(\d+(?:\.\d+)?)",
+        'quick_succession_bump': r"'quick_succession_bump'[:\s]+(\d+(?:\.\d+)?)",
+        'decay_days': r"'decay_days'[:\s]+(\d+(?:\.\d+)?)",
+        'multiphase_decay_rate': r"'multiphase_decay_rate'[:\s]+(\d+(?:\.\d+)?)",
+        # Weight adjustment parameters (if enabled)
+        'weight_up_precomp_penalty': r"'weight_up_precomp_penalty'[:\s]+(\d+(?:\.\d+)?)",
+        'weight_up_postcomp_bonus': r"'weight_up_postcomp_bonus'[:\s]+(\d+(?:\.\d+)?)",
+        # Elo denominator (if enabled)
+        'elo_denom': r"'elo_denom'[:\s]+(\d+(?:\.\d+)?)",
+        # Legacy decay parameters
+        'decay_rate': r"'decay_rate'[:\s]+(\d+(?:\.\d+)?)",
+        'min_days': r"'min_days'[:\s]+(\d+(?:\.\d+)?)",
     }
     
     for param_name, pattern in param_patterns.items():
@@ -164,7 +179,7 @@ def parse_subprocess_output(output):
     # If we found at least k and some weights, store them
     if 'k' in best_params and len(best_params) >= 4:
         result['best_params'] = best_params
-        print(f"  [DEBUG] Found best params: k={best_params.get('k')}, w_ko={best_params.get('w_ko')}, ...")
+        print(f"  [DEBUG] Found best params: {len(best_params)} parameters captured")
     
     # Extract training ROI (best ROI during GA optimization)
     train_roi_patterns = [
@@ -261,8 +276,262 @@ def format_value(value, format_spec=".2f", prefix="", suffix=""):
         return "N/A"
 
 
+def ensure_results_dir(script_dir):
+    """
+    Ensure the results directory exists.
+    
+    Args:
+        script_dir: Path to the scripts directory
+        
+    Returns:
+        str: Path to the results directory
+    """
+    results_dir = os.path.join(os.path.dirname(script_dir), 'results')
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+    return results_dir
+
+
+def save_params_to_json(config_name, params, metadata, results_dir):
+    """
+    Save full parameters to a JSON file for a single configuration.
+    
+    Args:
+        config_name: Name of the configuration (e.g., 'baseline', 'md+wa')
+        params: Dictionary of all parameters with full precision
+        metadata: Dictionary with additional metadata (seed, generations, ROI, etc.)
+        results_dir: Path to results directory
+        
+    Returns:
+        str: Path to the saved JSON file
+    """
+    output_file = os.path.join(results_dir, f"{config_name}_best_params.json")
+    
+    output_data = {
+        "config_name": config_name,
+        "parameters": params,
+        "metadata": metadata,
+        "generated_at": datetime.now().isoformat()
+    }
+    
+    with open(output_file, 'w') as f:
+        json.dump(output_data, f, indent=2)
+    
+    return output_file
+
+
+def generate_python_dict_output(config_name, params):
+    """
+    Generate copy-paste ready Python dictionary string.
+    
+    Args:
+        config_name: Name of the configuration
+        params: Dictionary of all parameters
+        
+    Returns:
+        str: Formatted Python dictionary string
+    """
+    lines = [f"# {config_name} config"]
+    lines.append(f"params_{config_name.replace('+', '_').replace('-', '_')} = {{")
+    
+    # Define the order for base parameters
+    base_params = ['k', 'w_ko', 'w_sub', 'w_udec', 'w_sdec', 'w_mdec']
+    # Multiphase decay params
+    md_params = ['quick_succession_days', 'quick_succession_bump', 'decay_days', 'multiphase_decay_rate']
+    # Weight adjustment params
+    wa_params = ['weight_up_precomp_penalty', 'weight_up_postcomp_bonus']
+    # Elo denom param
+    ed_params = ['elo_denom']
+    # Legacy decay params
+    decay_params = ['decay_rate', 'min_days']
+    
+    all_param_order = base_params + md_params + wa_params + ed_params + decay_params
+    
+    # Add parameters in order, only if they exist
+    param_lines = []
+    for param_name in all_param_order:
+        if param_name in params:
+            value = params[param_name]
+            # Format with full precision
+            if isinstance(value, float):
+                param_lines.append(f'    "{param_name}": {repr(value)},')
+            else:
+                param_lines.append(f'    "{param_name}": {value},')
+    
+    lines.extend(param_lines)
+    lines.append("}")
+    
+    return '\n'.join(lines)
+
+
+def print_full_params_display(config_name, params, json_path=None):
+    """
+    Print full parameters in a formatted display.
+    
+    Args:
+        config_name: Name of the configuration
+        params: Dictionary of all parameters
+        json_path: Optional path to the saved JSON file
+    """
+    # Define parameter groups
+    base_params = ['k', 'w_ko', 'w_sub', 'w_udec', 'w_sdec', 'w_mdec']
+    md_params = ['quick_succession_days', 'quick_succession_bump', 'decay_days', 'multiphase_decay_rate']
+    wa_params = ['weight_up_precomp_penalty', 'weight_up_postcomp_bonus']
+    ed_params = ['elo_denom']
+    
+    print(f"\n├─ Best Parameters (Full):")
+    
+    # Print base parameters
+    for param_name in base_params:
+        if param_name in params:
+            value = params[param_name]
+            print(f"│  ├─ {param_name}: {repr(value)}")
+    
+    # Print multiphase decay parameters if present
+    has_md = any(p in params for p in md_params)
+    if has_md:
+        for param_name in md_params:
+            if param_name in params:
+                value = params[param_name]
+                print(f"│  ├─ {param_name}: {repr(value)}")
+    
+    # Print weight adjustment parameters if present
+    has_wa = any(p in params for p in wa_params)
+    if has_wa:
+        for param_name in wa_params:
+            if param_name in params:
+                value = params[param_name]
+                print(f"│  ├─ {param_name}: {repr(value)}")
+    
+    # Print elo_denom if present
+    if 'elo_denom' in params:
+        print(f"│  ├─ elo_denom: {repr(params['elo_denom'])}")
+    
+    if json_path:
+        print(f"│  └─ [Full params saved to: {json_path}]")
+
+
+def save_master_summary(results, results_dir, seed, generations, population):
+    """
+    Save master summary JSON with all configurations' best parameters.
+    
+    Args:
+        results: List of result dictionaries from all configurations
+        results_dir: Path to results directory
+        seed: Random seed used
+        generations: Number of generations
+        population: Population size
+        
+    Returns:
+        str: Path to the saved master JSON file
+    """
+    output_file = os.path.join(results_dir, "all_configs_best_params.json")
+    
+    configs_data = []
+    for r in results:
+        config_entry = {
+            "config_name": r['name'],
+            "flags": {
+                "multiphase_decay": r.get('multiphase_decay', 'off'),
+                "weight_adjust": r.get('weight_adjust', 'off'),
+                "optimize_elo_denom": r.get('optimize_elo_denom', 'off')
+            },
+            "parameters": r.get('best_params', {}),
+            "metrics": {
+                "train_roi": r.get('train_roi'),
+                "oos_roi": r.get('oos_roi'),
+                "oos_accuracy": r.get('oos_accuracy'),
+                "num_bets": r.get('num_bets'),
+                "wins": r.get('wins'),
+                "win_rate": r.get('win_rate'),
+                "total_wagered": r.get('total_wagered'),
+                "total_profit": r.get('total_profit')
+            },
+            "success": r.get('success', False),
+            "elapsed_time": r.get('elapsed_time')
+        }
+        configs_data.append(config_entry)
+    
+    master_data = {
+        "run_info": {
+            "seed": seed,
+            "generations": generations,
+            "population": population,
+            "generated_at": datetime.now().isoformat()
+        },
+        "configurations": configs_data
+    }
+    
+    with open(output_file, 'w') as f:
+        json.dump(master_data, f, indent=2)
+    
+    return output_file
+
+
+def print_final_summary(results, results_dir, seed, generations, population):
+    """
+    Print final summary section after all configurations complete.
+    
+    Args:
+        results: List of result dictionaries from all configurations
+        results_dir: Path to results directory
+        seed: Random seed used
+        generations: Number of generations
+        population: Population size
+    """
+    print("\n" + "=" * 80)
+    print("FULL PARAMETER EXPORT SUMMARY")
+    print("=" * 80)
+    
+    print(f"\n📁 Results saved to: {results_dir}/")
+    print("\nIndividual configuration files:")
+    for r in results:
+        if r.get('success') and r.get('best_params'):
+            json_file = f"{r['name']}_best_params.json"
+            print(f"  ├─ {json_file}")
+    
+    master_file = "all_configs_best_params.json"
+    print(f"  └─ {master_file} (master summary)")
+    
+    # Print all Python dicts for copy-paste
+    print("\n" + "=" * 80)
+    print("📋 COPY-PASTE PYTHON DICTIONARIES")
+    print("=" * 80)
+    
+    for r in results:
+        if r.get('success') and r.get('best_params'):
+            print()
+            print(generate_python_dict_output(r['name'], r['best_params']))
+    
+    # Print usage instructions
+    print("\n" + "=" * 80)
+    print("USAGE INSTRUCTIONS")
+    print("=" * 80)
+    print("""
+To use the best parameters in main.py:
+  1. Copy the Python dictionary above
+  2. Import the parameters in your script
+  3. Pass them to run_basic_elo_with_mov() or the GA functions
+
+Example:
+  from scripts.full_genetic_with_k_denom_mov import run_basic_elo
+  
+  df = run_basic_elo(df, k=params["k"], mov_params={
+      "w_ko": params["w_ko"],
+      "w_sub": params["w_sub"],
+      "w_udec": params["w_udec"],
+      "w_sdec": params["w_sdec"],
+      "w_mdec": params["w_mdec"]
+  })
+
+To reproduce these results:
+  python scripts/run_all_config_tests.py --seed {} --generations {} --population {}
+""".format(seed, generations, population))
+
+
 def run_config(config, script_path, seed, generations, population, timeout=600, 
-               config_index=1, total_configs=8, baseline_roi=None, best_config=None):
+               config_index=1, total_configs=8, baseline_roi=None, best_config=None,
+               results_dir=None):
     """
     Run a single configuration and extract results with real-time progress output.
     
@@ -425,19 +694,38 @@ def run_config(config, script_path, seed, generations, population, timeout=600,
     if result['win_rate'] is not None:
         print(f"  ├─ Win Rate: {result['win_rate']*100:.1f}%")
     
-    # Best parameters (k and top 3 MoV weights)
+    # Best parameters - show full precision and save to JSON
     if result['best_params']:
         params = result['best_params']
-        k_str = format_value(params.get('k'), '.2f')
-        print(f"  ├─ Best k: {k_str}")
         
-        # Get top 3 MoV weights by value
-        mov_params = [(k, v) for k, v in params.items() if k.startswith('w_') and v is not None]
-        mov_params.sort(key=lambda x: x[1], reverse=True)
-        if mov_params:
-            top3 = mov_params[:3]
-            top3_str = ", ".join([f"{k}={v:.2f}" for k, v in top3])
-            print(f"  ├─ Top MoV: {top3_str}")
+        # Display full parameters with no truncation
+        print_full_params_display(config['name'], params)
+        
+        # Save to JSON if results_dir is provided
+        json_path = None
+        if results_dir:
+            metadata = {
+                "seed": seed,
+                "generations": generations,
+                "population": population,
+                "train_roi": result.get('train_roi'),
+                "oos_roi": result.get('oos_roi'),
+                "oos_accuracy": result.get('oos_accuracy'),
+                "num_bets": result.get('num_bets'),
+                "wins": result.get('wins'),
+                "win_rate": result.get('win_rate'),
+                "flags": {
+                    "multiphase_decay": config.get('multiphase_decay', 'off'),
+                    "weight_adjust": config.get('weight_adjust', 'off'),
+                    "optimize_elo_denom": config.get('optimize_elo_denom', 'off')
+                }
+            }
+            json_path = save_params_to_json(config['name'], params, metadata, results_dir)
+            print(f"│  └─ [Full params saved to: {json_path}]")
+        
+        # Print copy-paste Python dict
+        print(f"\n📋 Copy-paste into main.py:")
+        print(generate_python_dict_output(config['name'], params))
     
     # Total bets and profit
     if result['num_bets'] is not None and result['total_profit'] is not None:
@@ -566,23 +854,52 @@ def generate_report(results, seed):
     
     report_lines.append("-" * 80)
     
-    # Add detailed parameters for each configuration
+    # Add detailed parameters for each configuration - FULL PRECISION
     report_lines.extend([
         "",
-        "ALL CONFIGURATION PARAMETERS",
+        "ALL CONFIGURATION PARAMETERS (FULL PRECISION)",
         "-" * 80,
     ])
+    
+    # Define parameter groups
+    base_params = ['k', 'w_ko', 'w_sub', 'w_udec', 'w_sdec', 'w_mdec']
+    md_params = ['quick_succession_days', 'quick_succession_bump', 'decay_days', 'multiphase_decay_rate']
+    wa_params = ['weight_up_precomp_penalty', 'weight_up_postcomp_bonus']
+    ed_params = ['elo_denom']
+    decay_params = ['decay_rate', 'min_days']
     
     for r in sorted_results:
         if r.get('best_params'):
             params = r['best_params']
             report_lines.append(f"\n{r['name']}:")
-            report_lines.append(f"  k={params.get('k', 'N/A')}")
-            report_lines.append(f"  w_ko={params.get('w_ko', 'N/A')}")
-            report_lines.append(f"  w_sub={params.get('w_sub', 'N/A')}")
-            report_lines.append(f"  w_udec={params.get('w_udec', 'N/A')}")
-            report_lines.append(f"  w_sdec={params.get('w_sdec', 'N/A')}")
-            report_lines.append(f"  w_mdec={params.get('w_mdec', 'N/A')}")
+            
+            # Base parameters with full precision
+            for param_name in base_params:
+                if param_name in params:
+                    report_lines.append(f"  {param_name}={repr(params[param_name])}")
+            
+            # Multiphase decay parameters if present
+            has_md = any(p in params for p in md_params)
+            if has_md:
+                for param_name in md_params:
+                    if param_name in params:
+                        report_lines.append(f"  {param_name}={repr(params[param_name])}")
+            
+            # Weight adjustment parameters if present
+            has_wa = any(p in params for p in wa_params)
+            if has_wa:
+                for param_name in wa_params:
+                    if param_name in params:
+                        report_lines.append(f"  {param_name}={repr(params[param_name])}")
+            
+            # Elo denom if present
+            if 'elo_denom' in params:
+                report_lines.append(f"  elo_denom={repr(params['elo_denom'])}")
+            
+            # Decay params if present
+            for param_name in decay_params:
+                if param_name in params:
+                    report_lines.append(f"  {param_name}={repr(params[param_name])}")
         else:
             report_lines.append(f"\n{r['name']}: Parameters not available")
     
@@ -705,6 +1022,9 @@ def main():
         print(f"[ERROR] GA script not found: {ga_script}")
         sys.exit(1)
     
+    # Ensure results directory exists
+    results_dir = ensure_results_dir(script_dir)
+    
     print("=" * 80)
     print("RUN ALL CONFIGURATION TESTS")
     print("=" * 80)
@@ -713,6 +1033,7 @@ def main():
     print(f"Population: {args.population}")
     print(f"Timeout: {args.timeout}s")
     print(f"GA Script: {ga_script}")
+    print(f"Results Dir: {results_dir}")
     
     # Generate configurations
     all_configs = generate_all_configs()
@@ -746,7 +1067,8 @@ def main():
             config_index=i + 1,
             total_configs=len(all_configs),
             baseline_roi=baseline_roi,
-            best_config=best_config
+            best_config=best_config,
+            results_dir=results_dir
         )
         results.append(result)
         
@@ -784,6 +1106,18 @@ def main():
         print(f"\nReport saved to: {report_path}")
     except Exception as e:
         print(f"\n[WARNING] Could not save report: {e}")
+    
+    # Save master summary JSON with all configurations
+    try:
+        master_json_path = save_master_summary(
+            results, results_dir, args.seed, args.generations, args.population
+        )
+        print(f"Master summary saved to: {master_json_path}")
+    except Exception as e:
+        print(f"\n[WARNING] Could not save master summary: {e}")
+    
+    # Print final summary with all Python dicts and usage instructions
+    print_final_summary(results, results_dir, args.seed, args.generations, args.population)
     
     # Return success if at least one config succeeded
     successful = sum(1 for r in results if r['success'])
