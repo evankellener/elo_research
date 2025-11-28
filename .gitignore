@@ -34,3 +34,6 @@ build/
 # Data files (uncomment if you want to exclude CSV files)
 # *.csv
 
+# Generated report files
+config_test_report_*.txt
+
