@@ -68,6 +68,21 @@ def format_roi_comparison(current_roi, baseline_roi):
     return f" ({sign}{abs(diff):.2f}% vs baseline)"
 
 
+def sanitize_config_name(config_name):
+    """
+    Sanitize config name for use as a valid Python variable name.
+    
+    Replaces '+' with '_' and '-' with '_' to create valid identifiers.
+    
+    Args:
+        config_name: Original config name (e.g., 'md+wa', 'md+wa+ed')
+        
+    Returns:
+        str: Sanitized name suitable for Python variable names (e.g., 'md_wa', 'md_wa_ed')
+    """
+    return config_name.replace('+', '_').replace('-', '_')
+
+
 def parse_subprocess_output(output):
     """
     Parse subprocess output to extract ROI, accuracy, and best parameters.
@@ -145,30 +160,27 @@ def parse_subprocess_output(output):
     best_params = {}
     
     # Pattern for individual parameters - capture full decimal precision
-    # Base parameters (always present)
-    param_patterns = {
-        'k': r"'k'[:\s]+(\d+(?:\.\d+)?)",
-        'w_ko': r"'w_ko'[:\s]+(\d+(?:\.\d+)?)",
-        'w_sub': r"'w_sub'[:\s]+(\d+(?:\.\d+)?)",
-        'w_udec': r"'w_udec'[:\s]+(\d+(?:\.\d+)?)",
-        'w_sdec': r"'w_sdec'[:\s]+(\d+(?:\.\d+)?)",
-        'w_mdec': r"'w_mdec'[:\s]+(\d+(?:\.\d+)?)",
-        # Multiphase decay parameters (if enabled)
-        'quick_succession_days': r"'quick_succession_days'[:\s]+(\d+(?:\.\d+)?)",
-        'quick_succession_bump': r"'quick_succession_bump'[:\s]+(\d+(?:\.\d+)?)",
-        'decay_days': r"'decay_days'[:\s]+(\d+(?:\.\d+)?)",
-        'multiphase_decay_rate': r"'multiphase_decay_rate'[:\s]+(\d+(?:\.\d+)?)",
-        # Weight adjustment parameters (if enabled)
-        'weight_up_precomp_penalty': r"'weight_up_precomp_penalty'[:\s]+(\d+(?:\.\d+)?)",
-        'weight_up_postcomp_bonus': r"'weight_up_postcomp_bonus'[:\s]+(\d+(?:\.\d+)?)",
-        # Elo denominator (if enabled)
-        'elo_denom': r"'elo_denom'[:\s]+(\d+(?:\.\d+)?)",
-        # Legacy decay parameters
-        'decay_rate': r"'decay_rate'[:\s]+(\d+(?:\.\d+)?)",
-        'min_days': r"'min_days'[:\s]+(\d+(?:\.\d+)?)",
-    }
+    # Common pattern suffix for numeric value capture
+    def make_param_pattern(param_name):
+        """Create regex pattern for extracting a named parameter value."""
+        return rf"'{param_name}'[:\s]+(\d+(?:\.\d+)?)"
     
-    for param_name, pattern in param_patterns.items():
+    # All parameter names to extract
+    param_names = [
+        # Base parameters (always present)
+        'k', 'w_ko', 'w_sub', 'w_udec', 'w_sdec', 'w_mdec',
+        # Multiphase decay parameters (if enabled)
+        'quick_succession_days', 'quick_succession_bump', 'decay_days', 'multiphase_decay_rate',
+        # Weight adjustment parameters (if enabled)
+        'weight_up_precomp_penalty', 'weight_up_postcomp_bonus',
+        # Elo denominator (if enabled)
+        'elo_denom',
+        # Legacy decay parameters
+        'decay_rate', 'min_days',
+    ]
+    
+    for param_name in param_names:
+        pattern = make_param_pattern(param_name)
         match = re.search(pattern, output)
         if match:
             try:
@@ -332,7 +344,7 @@ def generate_python_dict_output(config_name, params):
         str: Formatted Python dictionary string
     """
     lines = [f"# {config_name} config"]
-    lines.append(f"params_{config_name.replace('+', '_').replace('-', '_')} = {{")
+    lines.append(f"params_{sanitize_config_name(config_name)} = {{")
     
     # Define the order for base parameters
     base_params = ['k', 'w_ko', 'w_sub', 'w_udec', 'w_sdec', 'w_mdec']
