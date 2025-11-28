@@ -107,6 +107,24 @@ def parse_subprocess_output(output):
     return result
 
 
+def convert_to_percentage(value):
+    """
+    Convert a value to percentage format.
+    
+    If value is <= 1, assumes it's a decimal (e.g., 0.573) and multiplies by 100.
+    If value is > 1, assumes it's already a percentage (e.g., 57.3).
+    
+    Args:
+        value: Numeric value that may be a decimal or percentage (can be None)
+        
+    Returns:
+        float: Value as a percentage, or None if input is None
+    """
+    if value is None:
+        return None
+    return value * 100 if value <= 1 else value
+
+
 def format_value(value, format_spec=".2f", prefix="", suffix=""):
     """
     Safely format a value, handling None values gracefully.
@@ -210,7 +228,8 @@ def run_config(config, script_path, seed, generations, population, timeout=600):
     # Print summary for this config
     print(f"\nResults for {config['name']}:")
     print(f"  OOS ROI: {format_value(result['oos_roi'], '.2f', suffix='%')}")
-    print(f"  OOS Accuracy: {format_value(result['oos_accuracy'], '.1f', suffix='%') if result['oos_accuracy'] is not None and result['oos_accuracy'] <= 1 else format_value(result['oos_accuracy'] * 100 if result['oos_accuracy'] is not None else None, '.1f', suffix='%')}")
+    acc_pct = convert_to_percentage(result['oos_accuracy'])
+    print(f"  OOS Accuracy: {format_value(acc_pct, '.1f', suffix='%')}")
     print(f"  Success: {result['success']}")
     
     return result
@@ -303,11 +322,8 @@ def generate_report(results, seed):
         roi_str = format_value(r['oos_roi'], '.2f', suffix='%')
         
         # Format accuracy (convert to percentage if needed)
-        if r['oos_accuracy'] is not None:
-            acc_value = r['oos_accuracy'] * 100 if r['oos_accuracy'] <= 1 else r['oos_accuracy']
-            acc_str = format_value(acc_value, '.1f', suffix='%')
-        else:
-            acc_str = "N/A"
+        acc_pct = convert_to_percentage(r['oos_accuracy'])
+        acc_str = format_value(acc_pct, '.1f', suffix='%')
         
         # Status
         if r['success']:
@@ -357,8 +373,8 @@ def generate_report(results, seed):
         max_acc = max(accuracy_values)
         
         # Convert to percentage for display
-        avg_acc_pct = avg_acc * 100 if avg_acc <= 1 else avg_acc
-        max_acc_pct = max_acc * 100 if max_acc <= 1 else max_acc
+        avg_acc_pct = convert_to_percentage(avg_acc)
+        max_acc_pct = convert_to_percentage(max_acc)
         
         report_lines.extend([
             "",
