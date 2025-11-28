@@ -14,6 +14,9 @@ Features:
 - Proper subprocess output parsing with debug logging
 - None value handling for partial data
 - Comprehensive comparison report
+- Real-time progress tracking with generation output
+- Per-iteration detailed summaries with timing
+- Running comparison against baseline/best configuration
 
 Usage:
     python scripts/run_all_config_tests.py
@@ -23,10 +26,45 @@ Usage:
 
 import argparse
 import os
+import random
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime
+
+
+def format_elapsed_time(seconds):
+    """Format elapsed time in human-readable format (e.g., '5m 42s')."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    return f"{minutes}m {secs:02d}s"
+
+
+def format_flag(value):
+    """Format a feature flag value with checkmark symbols."""
+    return "✓" if value == 'on' else "✗"
+
+
+def format_roi_with_sign(value):
+    """Format ROI value with explicit +/- sign."""
+    if value is None:
+        return "N/A"
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.2f}%"
+
+
+def format_roi_comparison(current_roi, baseline_roi):
+    """Format ROI comparison against baseline."""
+    if current_roi is None or baseline_roi is None:
+        return ""
+    diff = current_roi - baseline_roi
+    if abs(diff) < 0.01:
+        return " (same as baseline)"
+    sign = "↑" if diff > 0 else "↓"
+    return f" ({sign}{abs(diff):.2f}% vs baseline)"
 
 
 def parse_subprocess_output(output):
@@ -37,12 +75,19 @@ def parse_subprocess_output(output):
         output: String output from subprocess
         
     Returns:
-        dict: Contains 'oos_roi', 'oos_accuracy', and 'best_params' (may be None if not found)
+        dict: Contains 'oos_roi', 'oos_accuracy', 'best_params', 'train_roi', 
+              'num_bets', 'wins', 'win_rate', 'total_wagered', 'total_profit' (may be None if not found)
     """
     result = {
         'oos_roi': None,
         'oos_accuracy': None,
         'best_params': None,
+        'train_roi': None,
+        'num_bets': None,
+        'wins': None,
+        'win_rate': None,
+        'total_wagered': None,
+        'total_profit': None,
         'raw_output': output
     }
     
@@ -121,6 +166,44 @@ def parse_subprocess_output(output):
         result['best_params'] = best_params
         print(f"  [DEBUG] Found best params: k={best_params.get('k')}, w_ko={best_params.get('w_ko')}, ...")
     
+    # Extract training ROI (best ROI during GA optimization)
+    train_roi_patterns = [
+        r'Best ROI on.*?:\s*([+-]?\d+\.?\d*)%',
+        r'best ROI=([+-]?\d+\.?\d*)%',
+        r'\*\*\* NEW BEST:.*ROI=([+-]?\d+\.?\d*)%',
+    ]
+    for pattern in train_roi_patterns:
+        matches = re.findall(pattern, output, re.IGNORECASE)
+        if matches:
+            try:
+                # Take the last match as the best training ROI
+                result['train_roi'] = float(matches[-1])
+                break
+            except (ValueError, IndexError):
+                continue
+    
+    # Extract OOS metrics: Total Bets, Wins, Accuracy
+    bets_match = re.search(r'Total Bets:\s*(\d+)', output)
+    if bets_match:
+        result['num_bets'] = int(bets_match.group(1))
+    
+    wins_match = re.search(r'Wins:\s*(\d+)', output)
+    if wins_match:
+        result['wins'] = int(wins_match.group(1))
+    
+    # Calculate win rate if we have both
+    if result['num_bets'] and result['wins']:
+        result['win_rate'] = result['wins'] / result['num_bets'] if result['num_bets'] > 0 else 0
+    
+    # Extract Total Wagered and Total Profit
+    wagered_match = re.search(r'Total Wagered:\s*\$?(\d+\.?\d*)', output)
+    if wagered_match:
+        result['total_wagered'] = float(wagered_match.group(1))
+    
+    profit_match = re.search(r'Total Profit:\s*\$?([+-]?\d+\.?\d*)', output)
+    if profit_match:
+        result['total_profit'] = float(profit_match.group(1))
+    
     if result['oos_roi'] is None:
         print("  [DEBUG] Could not extract OOS ROI from output")
         # Print last few lines for debugging
@@ -178,9 +261,10 @@ def format_value(value, format_spec=".2f", prefix="", suffix=""):
         return "N/A"
 
 
-def run_config(config, script_path, seed, generations, population, timeout=600):
+def run_config(config, script_path, seed, generations, population, timeout=600, 
+               config_index=1, total_configs=8, baseline_roi=None, best_config=None):
     """
-    Run a single configuration and extract results.
+    Run a single configuration and extract results with real-time progress output.
     
     Args:
         config: dict with 'name' and flag settings
@@ -189,9 +273,14 @@ def run_config(config, script_path, seed, generations, population, timeout=600):
         generations: Number of generations
         population: Population size
         timeout: Maximum seconds to wait for subprocess
+        config_index: Current configuration number (1-indexed)
+        total_configs: Total number of configurations
+        baseline_roi: ROI of baseline config for comparison (None if not yet run)
+        best_config: Dict with 'name' and 'roi' of current best config
         
     Returns:
-        dict: Results including 'oos_roi', 'oos_accuracy', 'best_params', 'success', 'error'
+        dict: Results including 'oos_roi', 'oos_accuracy', 'best_params', 'success', 'error', 
+              'elapsed_time', 'train_roi', 'num_bets', 'wins', 'win_rate', 'total_wagered', 'total_profit'
     """
     result = {
         'name': config['name'],
@@ -201,6 +290,13 @@ def run_config(config, script_path, seed, generations, population, timeout=600):
         'oos_roi': None,
         'oos_accuracy': None,
         'best_params': None,
+        'train_roi': None,
+        'num_bets': None,
+        'wins': None,
+        'win_rate': None,
+        'total_wagered': None,
+        'total_profit': None,
+        'elapsed_time': None,
         'success': False,
         'error': None
     }
@@ -218,32 +314,64 @@ def run_config(config, script_path, seed, generations, population, timeout=600):
         '--optimize-elo-denom', config.get('optimize_elo_denom', 'off'),
     ]
     
-    print(f"\n{'='*60}")
-    print(f"Running: {config['name']}")
-    print(f"{'='*60}")
-    print(f"Command: {' '.join(cmd)}")
+    # Format flag display
+    md_flag = format_flag(config.get('multiphase_decay', 'off'))
+    wa_flag = format_flag(config.get('weight_adjust', 'off'))
+    ed_flag = format_flag(config.get('optimize_elo_denom', 'off'))
+    
+    print(f"\n{'='*70}")
+    print(f"[{config_index}/{total_configs}] Running: {config['name']} (md={md_flag} wa={wa_flag} ed={ed_flag})")
+    print(f"{'='*70}")
+    
+    start_time = time.time()
+    collected_output = []
     
     try:
-        process = subprocess.run(
+        # Use Popen for real-time output streaming
+        process = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=timeout,
+            bufsize=1,  # Line buffered
             cwd=os.path.dirname(os.path.dirname(script_path))
         )
         
-        output = process.stdout + process.stderr
+        # Stream output in real-time, filtering for key generation info
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+            if line:
+                collected_output.append(line)
+                # Show generation progress lines
+                if 'Gen ' in line and ('ROI=' in line or 'best=' in line):
+                    # This is a generation progress line - show it
+                    print(f"  {line.rstrip()}")
+                elif '*** NEW BEST' in line:
+                    # Highlight new best discoveries
+                    print(f"  ⭐ {line.rstrip()}")
+                elif 'Initial population' in line:
+                    print(f"  {line.rstrip()}")
+        
+        process.wait(timeout=timeout)
+        output = ''.join(collected_output)
         
         if process.returncode != 0:
             result['error'] = f"Process returned code {process.returncode}"
             print(f"  [ERROR] {result['error']}")
-            # Still try to parse output even on error
         
         # Parse output
         parsed = parse_subprocess_output(output)
         result['oos_roi'] = parsed['oos_roi']
         result['oos_accuracy'] = parsed['oos_accuracy']
         result['best_params'] = parsed.get('best_params')
+        result['train_roi'] = parsed.get('train_roi')
+        result['num_bets'] = parsed.get('num_bets')
+        result['wins'] = parsed.get('wins')
+        result['win_rate'] = parsed.get('win_rate')
+        result['total_wagered'] = parsed.get('total_wagered')
+        result['total_profit'] = parsed.get('total_profit')
         
         if result['oos_roi'] is not None or result['oos_accuracy'] is not None:
             result['success'] = True
@@ -251,32 +379,72 @@ def run_config(config, script_path, seed, generations, population, timeout=600):
     except subprocess.TimeoutExpired:
         result['error'] = f"Timeout after {timeout} seconds"
         print(f"  [ERROR] {result['error']}")
+        process.kill()
     except Exception as e:
         result['error'] = str(e)
         print(f"  [ERROR] {result['error']}")
     
-    # Print summary for this config
-    print(f"\nResults for {config['name']}:")
-    print(f"  OOS ROI: {format_value(result['oos_roi'], '.2f', suffix='%')}")
-    acc_pct = convert_to_percentage(result['oos_accuracy'])
-    print(f"  OOS Accuracy: {format_value(acc_pct, '.1f', suffix='%')}")
-    print(f"  Success: {result['success']}")
+    elapsed = time.time() - start_time
+    result['elapsed_time'] = elapsed
     
-    # Print best parameters if available
+    # Print enhanced summary for this config
+    print(f"\n[{config_index}/{total_configs}] {format_flag('on') if result['success'] else format_flag('off')} {config['name']} (md={md_flag} wa={wa_flag} ed={ed_flag}) [Elapsed: {format_elapsed_time(elapsed)}]")
+    
+    # Determine if this is the best ROI so far
+    is_best = False
+    if result['oos_roi'] is not None and best_config is not None:
+        if best_config['roi'] is None or result['oos_roi'] > best_config['roi']:
+            is_best = True
+    elif result['oos_roi'] is not None and best_config is None:
+        is_best = True  # First successful config is the best so far
+    
+    # Train ROI
+    if result['train_roi'] is not None:
+        print(f"  ├─ Train ROI: {format_roi_with_sign(result['train_roi'])}")
+    
+    # OOS ROI with comparison
+    roi_str = format_roi_with_sign(result['oos_roi'])
+    comparison_str = ""
+    if baseline_roi is not None and result['oos_roi'] is not None:
+        comparison_str = format_roi_comparison(result['oos_roi'], baseline_roi)
+    if is_best and result['oos_roi'] is not None:
+        print(f"  ├─ OOS ROI: {roi_str}{comparison_str} ⭐")
+    else:
+        print(f"  ├─ OOS ROI: {roi_str}{comparison_str}")
+    
+    # OOS Accuracy with bet count
+    acc_pct = convert_to_percentage(result['oos_accuracy'])
+    if result['num_bets'] is not None and result['wins'] is not None:
+        print(f"  ├─ OOS Accuracy: {format_value(acc_pct, '.1f', suffix='%')} ({result['wins']}/{result['num_bets']} bets)")
+    else:
+        print(f"  ├─ OOS Accuracy: {format_value(acc_pct, '.1f', suffix='%')}")
+    
+    # Win rate
+    if result['win_rate'] is not None:
+        print(f"  ├─ Win Rate: {result['win_rate']*100:.1f}%")
+    
+    # Best parameters (k and top 3 MoV weights)
     if result['best_params']:
         params = result['best_params']
         k_str = format_value(params.get('k'), '.2f')
-        w_ko_str = format_value(params.get('w_ko'), '.4f')
-        w_sub_str = format_value(params.get('w_sub'), '.4f')
-        w_udec_str = format_value(params.get('w_udec'), '.4f')
-        w_sdec_str = format_value(params.get('w_sdec'), '.4f')
-        w_mdec_str = format_value(params.get('w_mdec'), '.4f')
-        print(f"  Best Params: k={k_str}, " +
-              f"w_ko={w_ko_str}, " +
-              f"w_sub={w_sub_str}, " +
-              f"w_udec={w_udec_str}, " +
-              f"w_sdec={w_sdec_str}, " +
-              f"w_mdec={w_mdec_str}")
+        print(f"  ├─ Best k: {k_str}")
+        
+        # Get top 3 MoV weights by value
+        mov_params = [(k, v) for k, v in params.items() if k.startswith('w_') and v is not None]
+        mov_params.sort(key=lambda x: x[1], reverse=True)
+        if mov_params:
+            top3 = mov_params[:3]
+            top3_str = ", ".join([f"{k}={v:.2f}" for k, v in top3])
+            print(f"  ├─ Top MoV: {top3_str}")
+    
+    # Total bets and profit
+    if result['num_bets'] is not None and result['total_profit'] is not None:
+        profit_str = f"${result['total_profit']:.2f}" if result['total_profit'] >= 0 else f"-${abs(result['total_profit']):.2f}"
+        print(f"  ├─ Total: {result['num_bets']} bets, {profit_str} profit")
+    
+    # Status
+    status = "COMPLETE ✓" if result['success'] else f"FAILED ✗ ({result['error']})"
+    print(f"  └─ Status: {status}")
     
     return result
 
@@ -339,12 +507,12 @@ def generate_report(results, seed):
         f"Random Seed: {seed}",
         "",
         "Legend:",
-        "  md = multiphase-decay",
-        "  wa = weight-adjust",
-        "  ed = optimize-elo-denom",
+        "  md = multiphase-decay (✓ = ON, ✗ = OFF)",
+        "  wa = weight-adjust (✓ = ON, ✗ = OFF)",
+        "  ed = optimize-elo-denom (✓ = ON, ✗ = OFF)",
         "",
         "-" * 80,
-        f"{'Configuration':<20} {'md':<5} {'wa':<5} {'ed':<5} {'OOS ROI':<12} {'OOS Acc':<12} {'Status':<10}",
+        f"{'Configuration':<20} {'md':<4} {'wa':<4} {'ed':<4} {'OOS ROI':<12} {'OOS Acc':<10} {'Bets':<6} {'Time':<10} {'Status':<10}",
         "-" * 80,
     ]
     
@@ -359,33 +527,39 @@ def generate_report(results, seed):
     accuracy_values = []
     
     for r in sorted_results:
-        # Format flag display - use 'o' for on and '-' for off
-        md_flag = 'o' if r['multiphase_decay'] == 'on' else '-'
-        wa_flag = 'o' if r['weight_adjust'] == 'on' else '-'
-        ed_flag = 'o' if r['optimize_elo_denom'] == 'on' else '-'
+        # Format flag display with checkmarks
+        md_flag = format_flag(r['multiphase_decay'])
+        wa_flag = format_flag(r['weight_adjust'])
+        ed_flag = format_flag(r['optimize_elo_denom'])
         
-        # Format ROI
-        roi_str = format_value(r['oos_roi'], '.2f', suffix='%')
+        # Format ROI with sign
+        roi_str = format_roi_with_sign(r['oos_roi'])
         
         # Format accuracy (convert to percentage if needed)
         acc_pct = convert_to_percentage(r['oos_accuracy'])
         acc_str = format_value(acc_pct, '.1f', suffix='%')
         
+        # Format bets count
+        bets_str = str(r.get('num_bets', 'N/A')) if r.get('num_bets') is not None else 'N/A'
+        
+        # Format elapsed time
+        time_str = format_elapsed_time(r.get('elapsed_time', 0)) if r.get('elapsed_time') else 'N/A'
+        
         # Status
         if r['success']:
-            status = "OK"
+            status = "✓ OK"
             successful_count += 1
             if r['oos_roi'] is not None:
                 roi_values.append(r['oos_roi'])
             if r['oos_accuracy'] is not None:
                 accuracy_values.append(r['oos_accuracy'])
         elif r['error']:
-            status = "ERROR"
+            status = "✗ ERROR"
         else:
             status = "PARTIAL"
         
         report_lines.append(
-            f"{r['name']:<20} {md_flag:<5} {wa_flag:<5} {ed_flag:<5} {roi_str:<12} {acc_str:<12} {status:<10}"
+            f"{r['name']:<20} {md_flag:<4} {wa_flag:<4} {ed_flag:<4} {roi_str:<12} {acc_str:<10} {bets_str:<6} {time_str:<10} {status:<10}"
         )
     
     report_lines.append("-" * 80)
@@ -518,6 +692,9 @@ def main():
     
     args = parser.parse_args()
     
+    # Set random seed for reproducibility
+    random.seed(args.seed)
+    
     # Determine script path
     script_dir = os.path.dirname(os.path.abspath(__file__))
     ga_script = os.path.join(script_dir, 'full_genetic_with_k_denom_mov.py')
@@ -529,7 +706,7 @@ def main():
     print("=" * 80)
     print("RUN ALL CONFIGURATION TESTS")
     print("=" * 80)
-    print(f"Seed: {args.seed}")
+    print(f"Seed: {args.seed} (set for reproducibility)")
     print(f"Generations: {args.generations}")
     print(f"Population: {args.population}")
     print(f"Timeout: {args.timeout}s")
@@ -545,21 +722,49 @@ def main():
     
     print(f"\nConfigurations to run: {len(all_configs)}")
     for c in all_configs:
-        print(f"  - {c['name']}: md={c['multiphase_decay']}, wa={c['weight_adjust']}, ed={c['optimize_elo_denom']}")
+        md_flag = format_flag(c['multiphase_decay'])
+        wa_flag = format_flag(c['weight_adjust'])
+        ed_flag = format_flag(c['optimize_elo_denom'])
+        print(f"  - {c['name']}: md={md_flag} wa={wa_flag} ed={ed_flag}")
     
-    # Run all configurations
+    # Run all configurations with progress tracking
     results = []
+    baseline_roi = None
+    best_config = None  # {'name': str, 'roi': float}
+    total_start_time = time.time()
+    
     for i, config in enumerate(all_configs):
-        print(f"\n[{i+1}/{len(all_configs)}] Starting configuration: {config['name']}")
         result = run_config(
             config,
             ga_script,
             args.seed,
             args.generations,
             args.population,
-            args.timeout
+            args.timeout,
+            config_index=i + 1,
+            total_configs=len(all_configs),
+            baseline_roi=baseline_roi,
+            best_config=best_config
         )
         results.append(result)
+        
+        # Track baseline ROI (first successful config with name 'baseline')
+        if baseline_roi is None and result['success'] and config['name'] == 'baseline':
+            baseline_roi = result['oos_roi']
+        
+        # Track best configuration
+        if result['success'] and result['oos_roi'] is not None:
+            if best_config is None or result['oos_roi'] > best_config['roi']:
+                best_config = {'name': config['name'], 'roi': result['oos_roi']}
+        
+        # Show running best after each config
+        if best_config is not None:
+            print(f"\n🏆 Current Best: {best_config['name']} ({format_roi_with_sign(best_config['roi'])} ROI)")
+    
+    total_elapsed = time.time() - total_start_time
+    print(f"\n{'='*70}")
+    print(f"All configurations complete! Total time: {format_elapsed_time(total_elapsed)}")
+    print(f"{'='*70}")
     
     # Generate and print report
     report = generate_report(results, args.seed)
