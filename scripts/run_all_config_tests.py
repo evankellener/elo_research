@@ -168,9 +168,9 @@ def parse_subprocess_output(output):
     
     # Extract training ROI (best ROI during GA optimization)
     train_roi_patterns = [
-        r'Best ROI on.*?:\s*([+-]?\d+\.?\d*)%',
-        r'best ROI=([+-]?\d+\.?\d*)%',
-        r'\*\*\* NEW BEST:.*ROI=([+-]?\d+\.?\d*)%',
+        r'Best ROI on.*?:\s*([+-]?\d+(?:\.\d+)?)%',
+        r'best ROI=([+-]?\d+(?:\.\d+)?)%',
+        r'\*\*\* NEW BEST:.*ROI=([+-]?\d+(?:\.\d+)?)%',
     ]
     for pattern in train_roi_patterns:
         matches = re.findall(pattern, output, re.IGNORECASE)
@@ -191,16 +191,16 @@ def parse_subprocess_output(output):
     if wins_match:
         result['wins'] = int(wins_match.group(1))
     
-    # Calculate win rate if we have both
-    if result['num_bets'] and result['wins']:
+    # Calculate win rate if we have both num_bets and wins (including 0 values)
+    if result['num_bets'] is not None and result['wins'] is not None:
         result['win_rate'] = result['wins'] / result['num_bets'] if result['num_bets'] > 0 else 0
     
     # Extract Total Wagered and Total Profit
-    wagered_match = re.search(r'Total Wagered:\s*\$?(\d+\.?\d*)', output)
+    wagered_match = re.search(r'Total Wagered:\s*\$?(\d+(?:\.\d+)?)', output)
     if wagered_match:
         result['total_wagered'] = float(wagered_match.group(1))
     
-    profit_match = re.search(r'Total Profit:\s*\$?([+-]?\d+\.?\d*)', output)
+    profit_match = re.search(r'Total Profit:\s*\$?([+-]?\d+(?:\.\d+)?)', output)
     if profit_match:
         result['total_profit'] = float(profit_match.group(1))
     
@@ -325,6 +325,7 @@ def run_config(config, script_path, seed, generations, population, timeout=600,
     
     start_time = time.time()
     collected_output = []
+    process = None
     
     try:
         # Use Popen for real-time output streaming
@@ -379,7 +380,8 @@ def run_config(config, script_path, seed, generations, population, timeout=600,
     except subprocess.TimeoutExpired:
         result['error'] = f"Timeout after {timeout} seconds"
         print(f"  [ERROR] {result['error']}")
-        process.kill()
+        if process is not None:
+            process.kill()
     except Exception as e:
         result['error'] = str(e)
         print(f"  [ERROR] {result['error']}")
