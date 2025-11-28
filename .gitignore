@@ -37,3 +37,5 @@ build/
 # Generated report files
 config_test_report_*.txt
 
+# Generated results directory (parameter exports)
+results/
