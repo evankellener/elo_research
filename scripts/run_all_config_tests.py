@@ -519,7 +519,7 @@ def print_final_summary(results, results_dir, seed, generations, population):
     print("\n" + "=" * 80)
     print("USAGE INSTRUCTIONS")
     print("=" * 80)
-    print("""
+    print(f"""
 To use the best parameters in main.py:
   1. Copy the Python dictionary above
   2. Import the parameters in your script
@@ -528,17 +528,17 @@ To use the best parameters in main.py:
 Example:
   from scripts.full_genetic_with_k_denom_mov import run_basic_elo
   
-  df = run_basic_elo(df, k=params["k"], mov_params={
+  df = run_basic_elo(df, k=params["k"], mov_params={{
       "w_ko": params["w_ko"],
       "w_sub": params["w_sub"],
       "w_udec": params["w_udec"],
       "w_sdec": params["w_sdec"],
       "w_mdec": params["w_mdec"]
-  })
+  }})
 
 To reproduce these results:
-  python scripts/run_all_config_tests.py --seed {} --generations {} --population {}
-""".format(seed, generations, population))
+  python scripts/run_all_config_tests.py --seed {seed} --generations {generations} --population {population}
+""")
 
 
 def run_config(config, script_path, seed, generations, population, timeout=600, 
