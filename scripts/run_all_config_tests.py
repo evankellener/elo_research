@@ -31,17 +31,18 @@ from datetime import datetime
 
 def parse_subprocess_output(output):
     """
-    Parse subprocess output to extract ROI and accuracy values.
+    Parse subprocess output to extract ROI, accuracy, and best parameters.
     
     Args:
         output: String output from subprocess
         
     Returns:
-        dict: Contains 'oos_roi' and 'oos_accuracy' (may be None if not found)
+        dict: Contains 'oos_roi', 'oos_accuracy', and 'best_params' (may be None if not found)
     """
     result = {
         'oos_roi': None,
         'oos_accuracy': None,
+        'best_params': None,
         'raw_output': output
     }
     
@@ -92,6 +93,33 @@ def parse_subprocess_output(output):
                 break
             except (ValueError, IndexError):
                 continue
+    
+    # Try to extract best parameters
+    # Look for patterns like: {'k': 123.45, 'w_ko': 1.23, ...}
+    best_params = {}
+    
+    # Pattern for individual parameters
+    param_patterns = {
+        'k': r"'k'[:\s]+(\d+\.?\d*)",
+        'w_ko': r"'w_ko'[:\s]+(\d+\.?\d*)",
+        'w_sub': r"'w_sub'[:\s]+(\d+\.?\d*)",
+        'w_udec': r"'w_udec'[:\s]+(\d+\.?\d*)",
+        'w_sdec': r"'w_sdec'[:\s]+(\d+\.?\d*)",
+        'w_mdec': r"'w_mdec'[:\s]+(\d+\.?\d*)",
+    }
+    
+    for param_name, pattern in param_patterns.items():
+        match = re.search(pattern, output)
+        if match:
+            try:
+                best_params[param_name] = float(match.group(1))
+            except (ValueError, IndexError):
+                continue
+    
+    # If we found at least k and some weights, store them
+    if 'k' in best_params and len(best_params) >= 4:
+        result['best_params'] = best_params
+        print(f"  [DEBUG] Found best params: k={best_params.get('k')}, w_ko={best_params.get('w_ko')}, ...")
     
     if result['oos_roi'] is None:
         print("  [DEBUG] Could not extract OOS ROI from output")
@@ -163,7 +191,7 @@ def run_config(config, script_path, seed, generations, population, timeout=600):
         timeout: Maximum seconds to wait for subprocess
         
     Returns:
-        dict: Results including 'oos_roi', 'oos_accuracy', 'success', 'error'
+        dict: Results including 'oos_roi', 'oos_accuracy', 'best_params', 'success', 'error'
     """
     result = {
         'name': config['name'],
@@ -172,6 +200,7 @@ def run_config(config, script_path, seed, generations, population, timeout=600):
         'optimize_elo_denom': config.get('optimize_elo_denom', 'off'),
         'oos_roi': None,
         'oos_accuracy': None,
+        'best_params': None,
         'success': False,
         'error': None
     }
@@ -214,6 +243,7 @@ def run_config(config, script_path, seed, generations, population, timeout=600):
         parsed = parse_subprocess_output(output)
         result['oos_roi'] = parsed['oos_roi']
         result['oos_accuracy'] = parsed['oos_accuracy']
+        result['best_params'] = parsed.get('best_params')
         
         if result['oos_roi'] is not None or result['oos_accuracy'] is not None:
             result['success'] = True
@@ -231,6 +261,16 @@ def run_config(config, script_path, seed, generations, population, timeout=600):
     acc_pct = convert_to_percentage(result['oos_accuracy'])
     print(f"  OOS Accuracy: {format_value(acc_pct, '.1f', suffix='%')}")
     print(f"  Success: {result['success']}")
+    
+    # Print best parameters if available
+    if result['best_params']:
+        params = result['best_params']
+        print(f"  Best Params: k={params.get('k', 'N/A'):.2f}, " +
+              f"w_ko={params.get('w_ko', 'N/A'):.4f}, " +
+              f"w_sub={params.get('w_sub', 'N/A'):.4f}, " +
+              f"w_udec={params.get('w_udec', 'N/A'):.4f}, " +
+              f"w_sdec={params.get('w_sdec', 'N/A'):.4f}, " +
+              f"w_mdec={params.get('w_mdec', 'N/A'):.4f}")
     
     return result
 
@@ -344,6 +384,28 @@ def generate_report(results, seed):
     
     report_lines.append("-" * 80)
     
+    # Add detailed parameters for each configuration
+    report_lines.extend([
+        "",
+        "ALL CONFIGURATION PARAMETERS",
+        "-" * 80,
+    ])
+    
+    for r in sorted_results:
+        if r.get('best_params'):
+            params = r['best_params']
+            report_lines.append(f"\n{r['name']}:")
+            report_lines.append(f"  k={params.get('k', 'N/A')}")
+            report_lines.append(f"  w_ko={params.get('w_ko', 'N/A')}")
+            report_lines.append(f"  w_sub={params.get('w_sub', 'N/A')}")
+            report_lines.append(f"  w_udec={params.get('w_udec', 'N/A')}")
+            report_lines.append(f"  w_sdec={params.get('w_sdec', 'N/A')}")
+            report_lines.append(f"  w_mdec={params.get('w_mdec', 'N/A')}")
+        else:
+            report_lines.append(f"\n{r['name']}: Parameters not available")
+    
+    report_lines.append("-" * 80)
+    
     # Summary statistics
     report_lines.extend([
         "",
@@ -359,6 +421,7 @@ def generate_report(results, seed):
         max_roi = max(roi_values)
         min_roi = min(roi_values)
         best_config = next(r['name'] for r in sorted_results if r['oos_roi'] == max_roi)
+        best_result = next(r for r in sorted_results if r['oos_roi'] == max_roi)
         
         report_lines.extend([
             "",
@@ -367,6 +430,23 @@ def generate_report(results, seed):
             f"  Worst ROI: {format_value(min_roi, '.2f', suffix='%')}",
             f"  Average ROI: {format_value(avg_roi, '.2f', suffix='%')}",
         ])
+        
+        # Add best parameters in a format that can be directly used in main.py
+        if best_result.get('best_params'):
+            params = best_result['best_params']
+            report_lines.extend([
+                "",
+                "BEST PARAMETERS (copy to main.py):",
+                "-" * 40,
+                "# Best configuration: " + best_config,
+                "df = run_basic_elo_with_mov(df,",
+                f"                            k={params.get('k', 32)},",
+                f"                            w_ko={params.get('w_ko', 1.4)},",
+                f"                            w_sub={params.get('w_sub', 1.3)},",
+                f"                            w_udec={params.get('w_udec', 1.0)},",
+                f"                            w_sdec={params.get('w_sdec', 0.7)},",
+                f"                            w_mdec={params.get('w_mdec', 0.9)})",
+            ])
     
     if accuracy_values:
         avg_acc = sum(accuracy_values) / len(accuracy_values)
@@ -382,6 +462,20 @@ def generate_report(results, seed):
             f"  Best Accuracy: {format_value(max_acc_pct, '.1f', suffix='%')}",
             f"  Average Accuracy: {format_value(avg_acc_pct, '.1f', suffix='%')}",
         ])
+    
+    # Add reproducibility section
+    report_lines.extend([
+        "",
+        "REPRODUCIBILITY",
+        "-" * 40,
+        f"To reproduce these results, run:",
+        f"  python scripts/run_all_config_tests.py --seed {seed} --generations <N> --population <P>",
+        "",
+        "To use the best parameters in main.py:",
+        "  1. Copy the 'BEST PARAMETERS' code block above",
+        "  2. Paste into main.py replacing the existing run_basic_elo_with_mov call",
+        "  3. Run main.py to reproduce the Elo calculations",
+    ])
     
     report_lines.extend([
         "",
