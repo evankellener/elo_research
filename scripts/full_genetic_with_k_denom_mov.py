@@ -1152,6 +1152,239 @@ def _calculate_roi_worker(args):
     return params_dict["index"], roi
 
 
+def evaluate_params_roi_with_split(
+    df, 
+    odds_df, 
+    params, 
+    lookback_days=365,
+    validation_split=0.5,
+    decay_mode="none",
+    multiphase_decay=False,
+    weight_adjust=False,
+    optimize_elo_denom=False,
+    weight_history=None,
+    overfitting_threshold=2.0,
+):
+    """
+    Evaluate parameters using a train/validation split to detect overfitting.
+    
+    This function implements a proper train/validation split within the lookback window:
+    1. Train Elo on ALL historical data (before the lookback window)
+    2. Split the lookback window into train (earlier) and validation (later) portions
+    3. Calculate train_roi on the training portion
+    4. Calculate val_roi on the validation portion
+    5. Compute fitness that penalizes overfitting (when train_roi >> val_roi)
+    
+    Args:
+        df: All historical fight data
+        odds_df: Odds data with avg_odds column
+        params: Dict with k, w_ko, w_sub, w_udec, w_sdec, w_mdec, and optionally decay params
+        lookback_days: Total number of days in the lookback window (default 365)
+        validation_split: Fraction of lookback window to use for validation (default 0.5)
+                         E.g., 0.5 means first 50% is train, last 50% is validation
+        decay_mode: "linear", "exponential", or "none" (default "none")
+        multiphase_decay: If True, use multiphase decay parameters
+        weight_adjust: If True, use weight adjustment parameters
+        optimize_elo_denom: If True, use elo_denom parameter
+        weight_history: Pre-built fighter weight history
+        overfitting_threshold: Max allowed gap between train and val ROI (default 2.0%)
+    
+    Returns:
+        dict: Contains:
+            - train_roi: ROI on training portion of lookback window
+            - val_roi: ROI on validation portion of lookback window
+            - fitness: Combined fitness score that penalizes overfitting
+            - gap: Difference between train_roi and val_roi
+            - is_overfitted: Boolean indicating if train_roi - val_roi > threshold
+            - train_bets: Number of bets in training period
+            - val_bets: Number of bets in validation period
+            - extended: Full extended metrics from validation portion
+    """
+    mov_params = {
+        "w_ko":   params["w_ko"],
+        "w_sub":  params["w_sub"],
+        "w_udec": params["w_udec"],
+        "w_sdec": params["w_sdec"],
+        "w_mdec": params["w_mdec"],
+    }
+    k = params["k"]
+    
+    # Get decay parameters if present
+    decay_rate = params.get("decay_rate", 0.0)
+    min_days = params.get("min_days", 180)
+    
+    # Get elo_denom if optimize_elo_denom is enabled
+    elo_denom = params.get("elo_denom", 400) if optimize_elo_denom else 400
+    
+    # Prepare multiphase decay params
+    multiphase_decay_params = None
+    if multiphase_decay:
+        multiphase_decay_params = {
+            "quick_succession_days": params.get("quick_succession_days", 30),
+            "quick_succession_bump": params.get("quick_succession_bump", 1.05),
+            "decay_days": params.get("decay_days", 180),
+            "multiphase_decay_rate": params.get("multiphase_decay_rate", 0.002),
+        }
+    
+    # Prepare weight adjust params
+    weight_adjust_params = None
+    if weight_adjust:
+        weight_adjust_params = {
+            "weight_up_precomp_penalty": params.get("weight_up_precomp_penalty", 0.95),
+            "weight_up_postcomp_bonus": params.get("weight_up_postcomp_bonus", 1.10),
+        }
+    
+    # Train Elo on ALL historical data
+    df_with_elo = run_basic_elo(
+        df.copy(), k=k, mov_params=mov_params, denominator=elo_denom,
+        decay_mode=decay_mode, decay_rate=decay_rate, min_days=min_days,
+        multiphase_decay_params=multiphase_decay_params,
+        weight_adjust_params=weight_adjust_params,
+        weight_history=weight_history
+    )
+    
+    # Calculate date boundaries for train/validation split
+    max_date = df_with_elo["DATE"].max()
+    lookback_start = max_date - pd.Timedelta(days=lookback_days)
+    
+    # Split lookback window: first portion = train, second portion = validation
+    train_days = int(lookback_days * (1 - validation_split))
+    train_end = lookback_start + pd.Timedelta(days=train_days)
+    
+    # Training period: from lookback_start to train_end
+    train_df = df_with_elo[(df_with_elo["DATE"] > lookback_start) & 
+                           (df_with_elo["DATE"] <= train_end)].copy()
+    
+    # Validation period: from train_end to max_date
+    val_df = df_with_elo[df_with_elo["DATE"] > train_end].copy()
+    
+    # Build bidirectional odds lookup
+    odds_lookup = build_bidirectional_odds_lookup(odds_df)
+    
+    # Build fighter history for prior fight check
+    hist = build_fighter_history(df_with_elo)
+    first_dates = hist.groupby("fighter")["date"].min().to_dict()
+    
+    def calculate_roi_for_period(period_df, df_with_elo, odds_lookup, first_dates):
+        """Calculate ROI for a specific period of fights."""
+        total_wagered = 0.0
+        total_profit = 0.0
+        processed_fights = set()
+        bet_records = []
+        
+        for _, row in period_df.iterrows():
+            result = row["result"]
+            if result not in (0, 1):
+                continue
+            if pd.isna(row["DATE"]):
+                continue
+            
+            fighter = row["FIGHTER"]
+            opponent = row["opp_FIGHTER"]
+            date_str = str(row["DATE"].date())
+            
+            fight_key = tuple(sorted([fighter, opponent])) + (date_str,)
+            if fight_key in processed_fights:
+                continue
+            processed_fights.add(fight_key)
+            
+            if row["precomp_elo"] == row["opp_precomp_elo"]:
+                continue
+            
+            if not has_prior_history(first_dates, fighter, row["DATE"]):
+                continue
+            if not has_prior_history(first_dates, opponent, row["DATE"]):
+                continue
+            
+            fighter_has_higher_elo = row["precomp_elo"] > row["opp_precomp_elo"]
+            
+            if fighter_has_higher_elo:
+                bet_on = fighter
+                bet_against = opponent
+                odds_key = (fighter, opponent, date_str)
+                bet_won = (result == 1)
+            else:
+                bet_on = opponent
+                bet_against = fighter
+                odds_key = (opponent, fighter, date_str)
+                bet_won = (result == 0)
+            
+            if odds_key not in odds_lookup:
+                continue
+            
+            bet_odds = odds_lookup[odds_key]
+            decimal_odds = american_odds_to_decimal(bet_odds)
+            if decimal_odds is None:
+                continue
+            
+            bet_amount = 1.0
+            total_wagered += bet_amount
+            
+            if bet_won:
+                payout = bet_amount * decimal_odds
+                profit = payout - bet_amount
+            else:
+                profit = -bet_amount
+            
+            total_profit += profit
+            bet_records.append({
+                'date': row["DATE"],
+                'profit': profit,
+                'bet_amount': bet_amount,
+                'bet_won': int(bet_won)
+            })
+        
+        if total_wagered == 0:
+            return 0.0, 0, bet_records
+        
+        roi_percent = (total_profit / total_wagered) * 100
+        return roi_percent, len(bet_records), bet_records
+    
+    # Calculate ROI for train and validation periods
+    train_roi, train_bets, train_records = calculate_roi_for_period(
+        train_df, df_with_elo, odds_lookup, first_dates
+    )
+    val_roi, val_bets, val_records = calculate_roi_for_period(
+        val_df, df_with_elo, odds_lookup, first_dates
+    )
+    
+    # Calculate gap and overfitting status
+    gap = train_roi - val_roi
+    is_overfitted = gap > overfitting_threshold
+    
+    # Calculate fitness with overfitting penalty
+    # Fitness = 0.7 * val_roi + 0.3 * train_roi, but heavily penalize overfitting
+    if is_overfitted:
+        # If overfitted, heavily penalize by using only 0.5 * val_roi
+        fitness = 0.5 * val_roi
+    else:
+        # Normal case: weighted combination favoring validation
+        fitness = 0.7 * val_roi + 0.3 * train_roi
+    
+    # Calculate extended metrics on validation data for reporting
+    extended = evaluate_params_roi(
+        df, odds_df, params, 
+        lookback_days=int(lookback_days * validation_split),  # Approx validation window
+        return_extended=True, decay_mode=decay_mode,
+        multiphase_decay=multiphase_decay, weight_adjust=weight_adjust,
+        optimize_elo_denom=optimize_elo_denom, weight_history=weight_history
+    )
+    
+    return {
+        'train_roi': train_roi,
+        'val_roi': val_roi,
+        'fitness': fitness,
+        'gap': gap,
+        'is_overfitted': is_overfitted,
+        'train_bets': train_bets,
+        'val_bets': val_bets,
+        'train_start': lookback_start,
+        'train_end': train_end,
+        'val_end': max_date,
+        'extended': extended,
+    }
+
+
 def ga_search_params_roi(
     df,
     odds_df,
@@ -1167,6 +1400,9 @@ def ga_search_params_roi(
     multiphase_decay=False,
     weight_adjust=False,
     optimize_elo_denom=False,
+    use_train_val_split=False,
+    validation_split=0.5,
+    overfitting_threshold=2.0,
 ):
     """
     Full GA search over k and method of victory weights using ROI as fitness.
@@ -1178,6 +1414,12 @@ def ga_search_params_roi(
        - Calculate ROI by simulating $1 bets on the higher-rated fighter for fights with odds
        - Use ROI% as the fitness metric (or weighted combination with trend/sharpe)
     3. Evolve parameters to maximize fitness
+    
+    When use_train_val_split=True, implements overfitting detection:
+    - Splits the lookback window into train (earlier) and validation (later) portions
+    - Calculates train_roi and val_roi separately
+    - Penalizes candidates with large train/val gap (overfitting)
+    - Uses fitness = 0.7 * val_roi + 0.3 * train_roi (or 0.5 * val_roi if overfitted)
     
     Args:
         df: All historical fight data (will be used for training Elo)
@@ -1197,6 +1439,12 @@ def ga_search_params_roi(
         multiphase_decay: If True, use multiphase decay feature (--multiphase-decay on)
         weight_adjust: If True, use weight adjustment feature (--weight-adjust on)
         optimize_elo_denom: If True, optimize elo_denom parameter (--optimize-elo-denom on)
+        use_train_val_split: If True, use train/validation split for fitness calculation
+                            to detect and penalize overfitting (default False)
+        validation_split: Fraction of lookback window to use for validation (default 0.5)
+                         Only used when use_train_val_split=True
+        overfitting_threshold: Max allowed gap between train and val ROI in percentage points
+                              (default 2.0%). Candidates with larger gaps are penalized.
     
     Returns:
         If return_all_results=False: best_params, best_fitness
@@ -1351,14 +1599,56 @@ def ga_search_params_roi(
         return fitness
     
     def evaluate_individual(params):
-        """Evaluate params and return fitness plus extended metrics."""
-        extended = evaluate_params_roi(
-            df, odds_df, params, lookback_days=lookback_days, 
-            return_extended=True, decay_mode=decay_mode,
-            multiphase_decay=multiphase_decay, weight_adjust=weight_adjust,
-            optimize_elo_denom=optimize_elo_denom, weight_history=weight_history
-        )
-        fitness = compute_fitness(extended)
+        """Evaluate params and return fitness plus extended metrics.
+        
+        When use_train_val_split is True, uses train/validation split to
+        detect overfitting and penalize candidates with large train/val gaps.
+        """
+        if use_train_val_split and lookback_days and lookback_days > 0:
+            # Use train/validation split for overfitting detection
+            split_result = evaluate_params_roi_with_split(
+                df, odds_df, params,
+                lookback_days=lookback_days,
+                validation_split=validation_split,
+                decay_mode=decay_mode,
+                multiphase_decay=multiphase_decay,
+                weight_adjust=weight_adjust,
+                optimize_elo_denom=optimize_elo_denom,
+                weight_history=weight_history,
+                overfitting_threshold=overfitting_threshold,
+            )
+            
+            # Get extended metrics from the split result
+            extended = split_result['extended']
+            
+            # Add train/val metrics to extended for reporting
+            extended['train_roi'] = split_result['train_roi']
+            extended['val_roi'] = split_result['val_roi']
+            extended['train_val_gap'] = split_result['gap']
+            extended['is_overfitted'] = split_result['is_overfitted']
+            extended['train_bets'] = split_result['train_bets']
+            extended['val_bets'] = split_result['val_bets']
+            
+            # Use split-based fitness if fitness_weights not specified
+            if not fitness_weights:
+                fitness = split_result['fitness']
+            else:
+                # Use multi-objective fitness but still consider overfitting
+                base_fitness = compute_fitness(extended)
+                if split_result['is_overfitted']:
+                    fitness = base_fitness * 0.5  # Penalize overfitted params
+                else:
+                    fitness = base_fitness
+        else:
+            # Original behavior without train/val split
+            extended = evaluate_params_roi(
+                df, odds_df, params, lookback_days=lookback_days, 
+                return_extended=True, decay_mode=decay_mode,
+                multiphase_decay=multiphase_decay, weight_adjust=weight_adjust,
+                optimize_elo_denom=optimize_elo_denom, weight_history=weight_history
+            )
+            fitness = compute_fitness(extended)
+        
         return fitness, extended
     
     # Initialize population with diverse parameters
@@ -1441,11 +1731,37 @@ def ga_search_params_roi(
                 min_days_val = gen_best['params'].get('min_days', 180)
                 decay_str = f", decay_rate={decay_rate:.5f}, min_days={min_days_val:.0f}"
             
-            print(
-                f"Gen {gen + 1:02d}, best ROI={roi:+.2f}%, Trend={trend_str}, "
-                f"Sharpe={sharpe_str}, WinRate={win_rate_str}, Bets={num_bets}, "
-                f"fitness_range=[{min_fitness:.2f}, {max_fitness:.2f}]"
-            )
+            # Print train/val split info if enabled
+            if use_train_val_split and 'train_roi' in ext:
+                train_roi = ext.get('train_roi', 0)
+                val_roi = ext.get('val_roi', 0)
+                gap = ext.get('train_val_gap', 0)
+                is_overfitted = ext.get('is_overfitted', False)
+                train_bets = ext.get('train_bets', 0)
+                val_bets = ext.get('val_bets', 0)
+                
+                # Overfitting indicator
+                if is_overfitted:
+                    status = "⚠️ OVERFITTED"
+                elif gap > 1.0:
+                    status = "⚠️ slight gap"
+                else:
+                    status = "✅ generalizes"
+                
+                print(
+                    f"Gen {gen + 1:02d}: train_roi={train_roi:+.2f}%, val_roi={val_roi:+.2f}%, "
+                    f"gap={gap:.1f}% {status}"
+                )
+                print(
+                    f"  Train bets={train_bets}, Val bets={val_bets}, "
+                    f"Trend={trend_str}, Sharpe={sharpe_str}, WinRate={win_rate_str}"
+                )
+            else:
+                print(
+                    f"Gen {gen + 1:02d}, best ROI={roi:+.2f}%, Trend={trend_str}, "
+                    f"Sharpe={sharpe_str}, WinRate={win_rate_str}, Bets={num_bets}, "
+                    f"fitness_range=[{min_fitness:.2f}, {max_fitness:.2f}]"
+                )
             
             # Print accuracy, log loss, brier score for best params
             accuracy = ext.get('accuracy')
@@ -1496,6 +1812,13 @@ def ga_search_params_roi(
                 'best_auc_roc': ext.get('auc_roc'),
                 'best_consistency_variance': ext.get('consistency_variance'),
                 'best_max_drawdown': ext.get('max_drawdown'),
+                # Train/val split metrics (if enabled)
+                'best_train_roi': ext.get('train_roi'),
+                'best_val_roi': ext.get('val_roi'),
+                'best_train_val_gap': ext.get('train_val_gap'),
+                'best_is_overfitted': ext.get('is_overfitted'),
+                'best_train_bets': ext.get('train_bets'),
+                'best_val_bets': ext.get('val_bets'),
             }
             all_results.append(gen_summary)
     
@@ -2234,12 +2557,30 @@ if __name__ == "__main__":
                         dest="show_comprehensive",
                         help="Show comprehensive metrics summary after optimization.")
     
+    # Train/Validation Split options for overfitting detection
+    parser.add_argument("--train-val-split", choices=["on", "off"], default="off",
+                        dest="train_val_split",
+                        help="Enable train/validation split for overfitting detection (default: off). "
+                             "When on, splits the lookback window into train and validation portions, "
+                             "calculates ROI on both, and penalizes candidates with large train/val gaps.")
+    parser.add_argument("--validation-split", type=float, default=0.5,
+                        dest="validation_split",
+                        help="Fraction of lookback window to use for validation (default: 0.5). "
+                             "E.g., 0.5 means first 50%% is train, last 50%% is validation. "
+                             "Only used when --train-val-split is on.")
+    parser.add_argument("--overfitting-threshold", type=float, default=2.0,
+                        dest="overfitting_threshold",
+                        help="Max allowed gap between train and val ROI in percentage points (default: 2.0). "
+                             "Candidates with larger gaps are penalized as overfitted. "
+                             "Only used when --train-val-split is on.")
+    
     args = parser.parse_args()
     
     # Convert on/off to boolean
     multiphase_decay = args.multiphase_decay == "on"
     weight_adjust = args.weight_adjust == "on"
     optimize_elo_denom = args.optimize_elo_denom == "on"
+    use_train_val_split = args.train_val_split == "on"
     
     # Parse fitness weights if provided
     fitness_weights = None
@@ -2277,7 +2618,7 @@ if __name__ == "__main__":
     print(f"Decay mode: {args.decay_mode}")
     
     # Log active feature flags
-    print(f"Feature flags: multiphase-decay={args.multiphase_decay}, weight-adjust={args.weight_adjust}, optimize-elo-denom={args.optimize_elo_denom}")
+    print(f"Feature flags: multiphase-decay={args.multiphase_decay}, weight-adjust={args.weight_adjust}, optimize-elo-denom={args.optimize_elo_denom}, train-val-split={args.train_val_split}")
 
     if args.mode == "roi":
         print("\n" + "="*60)
@@ -2313,6 +2654,12 @@ if __name__ == "__main__":
             print(f"Fitness mode: ROI-only")
         print("Calling ga_search_params_roi()...")
         
+        # Log train/val split info if enabled
+        if use_train_val_split:
+            print(f"Train/Validation Split: ENABLED")
+            print(f"  Validation split: {args.validation_split*100:.0f}%")
+            print(f"  Overfitting threshold: {args.overfitting_threshold}% gap")
+        
         # Run ROI-based GA search with lookback_days parameter and decay_mode
         best_params, best_roi, all_results = ga_search_params_roi(
             df,
@@ -2327,6 +2674,9 @@ if __name__ == "__main__":
             weight_adjust=weight_adjust,
             optimize_elo_denom=optimize_elo_denom,
             fitness_weights=fitness_weights,
+            use_train_val_split=use_train_val_split,
+            validation_split=args.validation_split,
+            overfitting_threshold=args.overfitting_threshold,
             return_all_results=True,
         )
 
@@ -2336,6 +2686,26 @@ if __name__ == "__main__":
             print(f"Best ROI on fights in last {args.lookback_days} days: {best_roi:.2f}%")
         else:
             print(f"Best ROI on all fights with odds: {best_roi:.2f}%")
+        
+        # Print train/val split summary if enabled
+        if use_train_val_split and all_results:
+            last_gen = all_results[-1]
+            train_roi = last_gen.get('best_train_roi')
+            val_roi = last_gen.get('best_val_roi')
+            gap = last_gen.get('best_train_val_gap')
+            is_overfitted = last_gen.get('best_is_overfitted')
+            
+            if train_roi is not None and val_roi is not None:
+                print(f"\n=== Train/Validation Split Summary ===")
+                print(f"  Train ROI: {train_roi:+.2f}%")
+                print(f"  Validation ROI: {val_roi:+.2f}%")
+                print(f"  Gap: {gap:.1f}%")
+                if is_overfitted:
+                    print(f"  Status: ⚠️ OVERFITTED (gap > {args.overfitting_threshold}%)")
+                elif gap > 1.0:
+                    print(f"  Status: ⚠️ Slight gap detected")
+                else:
+                    print(f"  Status: ✅ Good generalization")
 
         # Train final Elo with best params on ALL DATA before test dates
         mov_params = {
@@ -2408,6 +2778,46 @@ if __name__ == "__main__":
         print(f"  Total Wagered: ${oos_roi_results['total_wagered']:.2f}")
         print(f"  Total Profit: ${oos_roi_results['total_profit']:.2f}")
         print(f"  ROI: {oos_roi_results['roi_percent']:.2f}%")
+        
+        # Print final comparison: Train vs Val vs OOS (if train_val_split was enabled)
+        if use_train_val_split and all_results:
+            last_gen = all_results[-1]
+            train_roi = last_gen.get('best_train_roi')
+            val_roi = last_gen.get('best_val_roi')
+            oos_roi = oos_roi_results['roi_percent']
+            
+            if train_roi is not None and val_roi is not None:
+                print(f"\n" + "="*60)
+                print("FINAL SUMMARY: Train vs Validation vs OOS")
+                print("="*60)
+                print(f"  Train ROI:      {train_roi:+.2f}%")
+                print(f"  Validation ROI: {val_roi:+.2f}%")
+                print(f"  OOS ROI:        {oos_roi:+.2f}%")
+                print("-"*60)
+                
+                # Analyze the gaps
+                train_val_gap = abs(train_roi - val_roi)
+                val_oos_gap = abs(val_roi - oos_roi)
+                
+                # Success criteria check
+                all_positive = train_roi > 0 and val_roi > 0 and oos_roi > 0
+                small_train_val_gap = train_val_gap < 2.0
+                small_val_oos_gap = val_oos_gap < 2.0
+                close_val_oos = val_oos_gap < 3.0
+                
+                if all_positive and small_train_val_gap and close_val_oos:
+                    print("✅ SUCCESS: All ROIs positive with good generalization")
+                elif all_positive and small_train_val_gap:
+                    print("✅ GOOD: Positive ROIs, validation tracks training")
+                    if not close_val_oos:
+                        print(f"⚠️  OOS differs from validation by {val_oos_gap:.1f}%")
+                elif train_roi > 0 and val_roi > 0 and oos_roi < 0:
+                    print("⚠️  OVERFITTING DETECTED: Train/Val positive, OOS negative")
+                elif train_roi > val_roi and train_val_gap > 2.0:
+                    print(f"⚠️  POTENTIAL OVERFITTING: Train exceeds Val by {train_val_gap:.1f}%")
+                else:
+                    print("⚠️  Mixed results - review the data")
+                print("="*60)
         
         # Also calculate OOS accuracy for comparison
         print("\n=== OOS Accuracy evaluation on data/past3_events.csv ===")

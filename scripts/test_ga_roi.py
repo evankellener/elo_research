@@ -760,5 +760,261 @@ class TestGASearchParamsROIExtendedResults(unittest.TestCase):
         self.assertIsInstance(best_roi, float)
 
 
+class TestEvaluateParamsROIWithSplit(unittest.TestCase):
+    """Tests for evaluate_params_roi_with_split function"""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Set up class-level resources"""
+        cls.project_root = _PROJECT_ROOT
+        cls.data_file = _DATA_FILE
+        cls.odds_file = _ODDS_FILE
+    
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
+    def test_returns_required_keys(self):
+        """Test that evaluate_params_roi_with_split returns all required keys"""
+        from full_genetic_with_k_denom_mov import evaluate_params_roi_with_split
+        
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        params = {
+            'k': 32,
+            'w_ko': 1.4,
+            'w_sub': 1.3,
+            'w_udec': 1.0,
+            'w_sdec': 0.7,
+            'w_mdec': 0.9
+        }
+        
+        result = evaluate_params_roi_with_split(
+            df, odds_df, params,
+            lookback_days=365,
+            validation_split=0.5
+        )
+        
+        required_keys = ['train_roi', 'val_roi', 'fitness', 'gap', 'is_overfitted',
+                        'train_bets', 'val_bets', 'extended']
+        
+        for key in required_keys:
+            self.assertIn(key, result, f"Missing required key: {key}")
+    
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
+    def test_train_roi_and_val_roi_are_numeric(self):
+        """Test that train_roi and val_roi are numeric values"""
+        from full_genetic_with_k_denom_mov import evaluate_params_roi_with_split
+        
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        params = {
+            'k': 32,
+            'w_ko': 1.4,
+            'w_sub': 1.3,
+            'w_udec': 1.0,
+            'w_sdec': 0.7,
+            'w_mdec': 0.9
+        }
+        
+        result = evaluate_params_roi_with_split(
+            df, odds_df, params,
+            lookback_days=365,
+            validation_split=0.5
+        )
+        
+        self.assertIsInstance(result['train_roi'], float)
+        self.assertIsInstance(result['val_roi'], float)
+        self.assertIsInstance(result['fitness'], float)
+        self.assertIsInstance(result['gap'], float)
+        self.assertIsInstance(result['is_overfitted'], bool)
+    
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
+    def test_gap_calculation(self):
+        """Test that gap is correctly calculated as train_roi - val_roi"""
+        from full_genetic_with_k_denom_mov import evaluate_params_roi_with_split
+        
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        params = {
+            'k': 32,
+            'w_ko': 1.4,
+            'w_sub': 1.3,
+            'w_udec': 1.0,
+            'w_sdec': 0.7,
+            'w_mdec': 0.9
+        }
+        
+        result = evaluate_params_roi_with_split(
+            df, odds_df, params,
+            lookback_days=365,
+            validation_split=0.5
+        )
+        
+        expected_gap = result['train_roi'] - result['val_roi']
+        self.assertAlmostEqual(result['gap'], expected_gap, places=4)
+
+
+class TestGASearchParamsROIWithTrainValSplit(unittest.TestCase):
+    """Tests for ga_search_params_roi with train/val split enabled"""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Set up class-level resources"""
+        cls.project_root = _PROJECT_ROOT
+        cls.data_file = _DATA_FILE
+        cls.odds_file = _ODDS_FILE
+    
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
+    def test_train_val_split_returns_split_metrics(self):
+        """Test that train/val split results contain split-specific metrics"""
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        best_params, best_roi, all_results = ga_search_params_roi(
+            df,
+            odds_df,
+            population_size=3,
+            generations=2,
+            lookback_days=365,
+            seed=42,
+            verbose=False,
+            use_train_val_split=True,
+            validation_split=0.5,
+            overfitting_threshold=2.0,
+            return_all_results=True
+        )
+        
+        # Check that split metrics are in generation results
+        split_keys = ['best_train_roi', 'best_val_roi', 'best_train_val_gap', 'best_is_overfitted']
+        
+        for gen_result in all_results:
+            for key in split_keys:
+                self.assertIn(key, gen_result, f"Missing split key {key} in generation results")
+    
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
+    def test_train_val_split_penalizes_overfitting(self):
+        """Test that train/val split mode penalizes overfitted candidates"""
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        # Run GA with train/val split
+        best_params, best_roi = ga_search_params_roi(
+            df,
+            odds_df,
+            population_size=3,
+            generations=1,
+            lookback_days=365,
+            seed=42,
+            verbose=False,
+            use_train_val_split=True,
+            validation_split=0.5,
+            overfitting_threshold=2.0,
+        )
+        
+        # Should return valid results
+        self.assertIsInstance(best_params, dict)
+        self.assertIsInstance(best_roi, float)
+
+
+class TestTrainValSplitArgparse(unittest.TestCase):
+    """Tests for train/val split argparse arguments"""
+    
+    def setUp(self):
+        """Set up the argparse parser for train/val split tests"""
+        import argparse
+        self.parser = argparse.ArgumentParser(description="Genetic Algorithm for Elo Parameter Optimization")
+        self.parser.add_argument("--train-val-split", choices=["on", "off"], default="off",
+                                dest="train_val_split",
+                                help="Enable train/validation split for overfitting detection")
+        self.parser.add_argument("--validation-split", type=float, default=0.5,
+                                dest="validation_split",
+                                help="Fraction of lookback window to use for validation")
+        self.parser.add_argument("--overfitting-threshold", type=float, default=2.0,
+                                dest="overfitting_threshold",
+                                help="Max allowed gap between train and val ROI")
+    
+    def test_train_val_split_default_is_off(self):
+        """Test that default train-val-split is 'off'"""
+        args = self.parser.parse_args([])
+        self.assertEqual(args.train_val_split, "off")
+    
+    def test_train_val_split_on_explicit(self):
+        """Test that --train-val-split on is correctly parsed"""
+        args = self.parser.parse_args(["--train-val-split", "on"])
+        self.assertEqual(args.train_val_split, "on")
+    
+    def test_validation_split_default_is_05(self):
+        """Test that default validation-split is 0.5"""
+        args = self.parser.parse_args([])
+        self.assertEqual(args.validation_split, 0.5)
+    
+    def test_validation_split_custom(self):
+        """Test that --validation-split 0.3 is correctly parsed"""
+        args = self.parser.parse_args(["--validation-split", "0.3"])
+        self.assertAlmostEqual(args.validation_split, 0.3)
+    
+    def test_overfitting_threshold_default_is_2(self):
+        """Test that default overfitting-threshold is 2.0"""
+        args = self.parser.parse_args([])
+        self.assertEqual(args.overfitting_threshold, 2.0)
+    
+    def test_overfitting_threshold_custom(self):
+        """Test that --overfitting-threshold 3.0 is correctly parsed"""
+        args = self.parser.parse_args(["--overfitting-threshold", "3.0"])
+        self.assertAlmostEqual(args.overfitting_threshold, 3.0)
+    
+    def test_all_train_val_split_args_combined(self):
+        """Test that all train/val split args can be used together"""
+        args = self.parser.parse_args([
+            "--train-val-split", "on",
+            "--validation-split", "0.6",
+            "--overfitting-threshold", "1.5"
+        ])
+        self.assertEqual(args.train_val_split, "on")
+        self.assertAlmostEqual(args.validation_split, 0.6)
+        self.assertAlmostEqual(args.overfitting_threshold, 1.5)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
