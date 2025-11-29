@@ -49,7 +49,7 @@ EXPERIENCE_LEVELS = {
     'Unknown': (0, 5),       # 0-5 prior bouts
     'Novice': (6, 15),       # 6-15 prior bouts
     'Experienced': (16, 50), # 16-50 prior bouts
-    'Veteran': (51, float('inf'))  # 50+ prior bouts
+    'Veteran': (51, float('inf'))  # 51+ prior bouts
 }
 
 # Layoff Duration Thresholds (days)
@@ -150,20 +150,30 @@ def get_method_of_victory(row: pd.Series) -> str:
 
 def get_experience_level(bout_count: int) -> str:
     """Categorize fighter by experience level based on bout count."""
+    if bout_count is None or pd.isna(bout_count):
+        return 'Unknown'
+    bout_count = int(bout_count)
     for level, (low, high) in EXPERIENCE_LEVELS.items():
         if low <= bout_count <= high:
             return level
-    return 'Unknown'
+    # Fallback for very high bout counts (shouldn't happen with infinity bound)
+    return 'Veteran'
 
 
 def get_layoff_category(days: Optional[float]) -> str:
     """Categorize layoff duration."""
     if days is None or pd.isna(days):
         return 'Unknown'
-    for category, (low, high) in LAYOFF_THRESHOLDS.items():
-        if low <= days <= high:
-            return category
-    return 'Unknown'
+    days = float(days)
+    # Use exclusive upper bounds to avoid overlap
+    if days <= 90:
+        return 'Recent'
+    elif days <= 180:
+        return 'Medium'
+    elif days <= 274:
+        return 'Long'
+    else:
+        return 'Very Long'
 
 
 def get_opponent_quality(elo: float) -> str:
@@ -175,11 +185,31 @@ def get_opponent_quality(elo: float) -> str:
 
 
 def get_elo_margin_category(margin: float) -> str:
-    """Categorize Elo margin."""
-    for category, (low, high) in ELO_MARGINS.items():
-        if low <= margin < high:
-            return category
-    return 'Close (0-100)'
+    """Categorize Elo margin.
+    
+    Categories:
+    - margin > 300: Huge favorite
+    - 200 < margin <= 300: Large favorite
+    - 100 < margin <= 200: Small favorite
+    - 0 < margin <= 100: Close
+    - -100 < margin <= 0: Close underdog
+    - -200 < margin <= -100: Large underdog
+    - margin <= -200: Very large underdog
+    """
+    if margin > 300:
+        return 'Huge favorite (>300)'
+    elif margin > 200:
+        return 'Large favorite (200-300)'
+    elif margin > 100:
+        return 'Small favorite (100-200)'
+    elif margin > 0:
+        return 'Close (0-100)'
+    elif margin > -100:
+        return 'Close underdog (0-100)'
+    elif margin > -200:
+        return 'Large underdog (100-200)'
+    else:
+        return 'Very large underdog (200+)'
 
 
 # =============================================================================
@@ -217,15 +247,40 @@ def build_prediction_records(
     first_dates = hist.groupby("fighter")["date"].min().to_dict()
     odds_lookup = build_bidirectional_odds_lookup(odds_df)
     
-    # Build last fight dates for layoff calculation
-    last_fight_dates = {}
+    # Pre-compute fight dates for each fighter (sorted by date)
+    # This is O(n) and avoids the O(n²) nested loop later
+    fighter_fight_dates = {}
     for _, row in df.sort_values("DATE").iterrows():
         date = row["DATE"]
-        last_fight_dates[row["FIGHTER"]] = date
-        last_fight_dates[row["opp_FIGHTER"]] = date
+        fighter = row["FIGHTER"]
+        opponent = row["opp_FIGHTER"]
+        
+        if fighter not in fighter_fight_dates:
+            fighter_fight_dates[fighter] = []
+        fighter_fight_dates[fighter].append(date)
+        
+        if opponent not in fighter_fight_dates:
+            fighter_fight_dates[opponent] = []
+        fighter_fight_dates[opponent].append(date)
     
     records = []
     processed_fights = set()
+    
+    def get_layoff_days(fighter_name: str, fight_date: pd.Timestamp) -> Optional[float]:
+        """Get days since fighter's last fight before the given date."""
+        if fighter_name not in fighter_fight_dates:
+            return None
+        dates = fighter_fight_dates[fighter_name]
+        # Find the last fight date before the current fight
+        last_fight = None
+        for d in dates:
+            if d < fight_date:
+                last_fight = d
+            else:
+                break
+        if last_fight is None:
+            return None
+        return (fight_date - last_fight).days
     
     for _, row in df_with_elo.iterrows():
         result = row["result"]
@@ -298,20 +353,9 @@ def build_prediction_records(
         else:
             profit = -bet_amount
         
-        # Calculate layoff days (days since last fight)
-        fighter_last_fight = None
-        opp_last_fight = None
-        # Look for last fight before current fight date
-        for _, hist_row in df[df["DATE"] < row["DATE"]].sort_values("DATE", ascending=False).iterrows():
-            if fighter_last_fight is None and (hist_row["FIGHTER"] == fighter or hist_row["opp_FIGHTER"] == fighter):
-                fighter_last_fight = hist_row["DATE"]
-            if opp_last_fight is None and (hist_row["FIGHTER"] == opponent or hist_row["opp_FIGHTER"] == opponent):
-                opp_last_fight = hist_row["DATE"]
-            if fighter_last_fight is not None and opp_last_fight is not None:
-                break
-        
-        fighter_layoff = (row["DATE"] - fighter_last_fight).days if fighter_last_fight else None
-        opp_layoff = (row["DATE"] - opp_last_fight).days if opp_last_fight else None
+        # Calculate layoff days using pre-computed fight dates (O(n) per fighter)
+        fighter_layoff = get_layoff_days(fighter, row["DATE"])
+        opp_layoff = get_layoff_days(opponent, row["DATE"])
         
         # Determine which layoff to use (fighter we bet on)
         if bet_on == fighter:
@@ -927,7 +971,7 @@ def create_visualizations(records: pd.DataFrame, all_analyses: Dict, output_dir:
     if 'experience' in all_analyses:
         exp_data = all_analyses['experience']['by_bet_on_experience']
         levels = list(EXPERIENCE_LEVELS.keys())
-        accs = [exp_data[l]['accuracy'] * 100 if exp_data[l]['accuracy'] else 0 for l in levels]
+        accs = [exp_data[l]['accuracy'] * 100 if exp_data[l]['accuracy'] is not None else 0 for l in levels]
         colors = ['green' if a >= 55 else 'red' if a < 50 else 'orange' for a in accs]
         ax1.bar(levels, accs, color=colors, alpha=0.7, edgecolor='black')
         ax1.axhline(y=50, color='red', linestyle='--', alpha=0.5, label='50% baseline')
@@ -940,7 +984,7 @@ def create_visualizations(records: pd.DataFrame, all_analyses: Dict, output_dir:
     if 'layoff' in all_analyses:
         layoff_data = all_analyses['layoff']['by_layoff']
         categories = list(LAYOFF_THRESHOLDS.keys())
-        accs = [layoff_data[c]['accuracy'] * 100 if layoff_data[c]['accuracy'] else 0 for c in categories]
+        accs = [layoff_data[c]['accuracy'] * 100 if layoff_data[c]['accuracy'] is not None else 0 for c in categories]
         colors = ['green' if a >= 55 else 'red' if a < 50 else 'orange' for a in accs]
         ax2.bar(categories, accs, color=colors, alpha=0.7, edgecolor='black')
         ax2.axhline(y=50, color='red', linestyle='--', alpha=0.5)
@@ -953,7 +997,7 @@ def create_visualizations(records: pd.DataFrame, all_analyses: Dict, output_dir:
     if 'method' in all_analyses:
         method_data = all_analyses['method']['by_method']
         methods = FIGHT_METHODS
-        accs = [method_data[m]['accuracy'] * 100 if method_data.get(m, {}).get('accuracy') else 0 for m in methods]
+        accs = [method_data[m]['accuracy'] * 100 if method_data.get(m, {}).get('accuracy') is not None else 0 for m in methods]
         colors = ['green' if a >= 55 else 'red' if a < 50 else 'orange' for a in accs]
         ax3.barh(methods, accs, color=colors, alpha=0.7, edgecolor='black')
         ax3.axvline(x=50, color='red', linestyle='--', alpha=0.5)
@@ -1149,7 +1193,10 @@ def save_results_json(output_path: str, summary: Dict, all_analyses: Dict,
         'generated_at': pd.Timestamp.now().isoformat()
     }
     
-    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)
+    # Create output directory if it doesn't exist
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     
     with open(output_path, 'w') as f:
         json.dump(results, f, indent=2, default=str)
