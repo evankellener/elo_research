@@ -1604,7 +1604,7 @@ def ga_search_params_roi(
         When use_train_val_split is True, uses train/validation split to
         detect overfitting and penalize candidates with large train/val gaps.
         """
-        if use_train_val_split and lookback_days and lookback_days > 0:
+        if use_train_val_split and lookback_days > 0:
             # Use train/validation split for overfitting detection
             split_result = evaluate_params_roi_with_split(
                 df, odds_df, params,
@@ -1672,10 +1672,33 @@ def ga_search_params_roi(
         sharpe_str = f"{ext.get('sharpe_ratio', 0):.2f}" if ext.get('sharpe_ratio') is not None else "N/A"
         win_rate_str = f"{ext.get('win_rate', 0)*100:.0f}%" if ext.get('win_rate') is not None else "N/A"
         num_bets = ext.get('num_bets', 0)
-        print(
-            f"Initial population: best ROI={roi:.2f}%, "
-            f"Trend={trend_str}, Sharpe={sharpe_str}, WinRate={win_rate_str}, Bets={num_bets}"
-        )
+        
+        # Print train/val split info if enabled
+        if use_train_val_split and 'train_roi' in ext:
+            train_roi = ext.get('train_roi', 0)
+            val_roi = ext.get('val_roi', 0)
+            gap = ext.get('train_val_gap', 0)
+            is_overfitted = ext.get('is_overfitted', False)
+            
+            if is_overfitted:
+                status = "⚠️ OVERFITTED"
+            elif gap > 1.0:
+                status = "⚠️ slight gap"
+            else:
+                status = "✅ generalizes"
+            
+            print(
+                f"Initial population: train_roi={train_roi:+.2f}%, val_roi={val_roi:+.2f}%, "
+                f"gap={gap:.1f}% {status}"
+            )
+            print(
+                f"  Trend={trend_str}, Sharpe={sharpe_str}, WinRate={win_rate_str}, Bets={num_bets}"
+            )
+        else:
+            print(
+                f"Initial population: best ROI={roi:.2f}%, "
+                f"Trend={trend_str}, Sharpe={sharpe_str}, WinRate={win_rate_str}, Bets={num_bets}"
+            )
     
     # GA loop
     for gen in range(generations):
@@ -2566,7 +2589,7 @@ if __name__ == "__main__":
     parser.add_argument("--validation-split", type=float, default=0.5,
                         dest="validation_split",
                         help="Fraction of lookback window to use for validation (default: 0.5). "
-                             "E.g., 0.5 means first 50%% is train, last 50%% is validation. "
+                             "E.g., 0.5 means first 50 percent is train, last 50 percent is validation. "
                              "Only used when --train-val-split is on.")
     parser.add_argument("--overfitting-threshold", type=float, default=2.0,
                         dest="overfitting_threshold",
