@@ -579,9 +579,15 @@ def compute_consistency_by_experience_gap(df_with_elo):
             if not has_prior_history(first_dates, opponent, row["DATE"]):
                 continue
             
-            # Calculate experience gap
-            f_bouts = row.get("precomp_boutcount", 0) or 0
-            opp_bouts = row.get("opp_precomp_boutcount", 0) or 0
+            # Calculate experience gap (ensure numeric conversion)
+            f_bouts = row.get("precomp_boutcount", 0)
+            opp_bouts = row.get("opp_precomp_boutcount", 0)
+            try:
+                f_bouts = int(float(f_bouts)) if f_bouts and not pd.isna(f_bouts) else 0
+                opp_bouts = int(float(opp_bouts)) if opp_bouts and not pd.isna(opp_bouts) else 0
+            except (ValueError, TypeError):
+                f_bouts = 0
+                opp_bouts = 0
             exp_gap = abs(f_bouts - opp_bouts)
             
             if min_gap <= exp_gap <= max_gap:

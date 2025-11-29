@@ -1278,6 +1278,8 @@ def ga_search_params_roi(
         - calibration: Expected Calibration Error (lower is better)
         - consistency: Prediction consistency across subsets (lower variance is better)
         - auc: AUC-ROC score
+        
+        All metrics are normalized to approximately 0-10 scale before weighting.
         """
         roi = extended_metrics['roi_percent']
         
@@ -1285,7 +1287,6 @@ def ga_search_params_roi(
             return roi
         
         # Default fitness weights for multi-metric optimization
-        # (imported constants define: DEFAULT_ECE_THRESHOLD=0.1, DEFAULT_VARIANCE_THRESHOLD=0.01)
         default_weights = {'roi': 0.4, 'trend': 0.1, 'sharpe': 0.1, 'calibration': 0.15, 'consistency': 0.15, 'auc': 0.1}
         
         # Normalize weights
@@ -1298,41 +1299,54 @@ def ga_search_params_roi(
         w_auc = fitness_weights.get('auc', default_weights['auc']) / total_weight
         
         # Get metrics (use defaults if None)
-        # ECE threshold: 0.1 is poor calibration, 0.01 is excellent
-        # Variance threshold: 0.01 is inconsistent, 0.001 is excellent
-        ECE_THRESHOLD = 0.1
-        VARIANCE_THRESHOLD = 0.01
-        
         trend = extended_metrics.get('trend') or 0
         sharpe = extended_metrics.get('sharpe_ratio') or 0
-        ece = extended_metrics.get('ece') or ECE_THRESHOLD
-        consistency_var = extended_metrics.get('consistency_variance') or VARIANCE_THRESHOLD
+        ece = extended_metrics.get('ece')
+        consistency_var = extended_metrics.get('consistency_variance')
         auc = extended_metrics.get('auc_roc') or 0.5
         
-        # Weighted combination (scale each to similar magnitude as ROI ~= -10 to +20)
-        # ROI is already in percentage
-        fitness = roi * w_roi
+        # Weighted combination
+        # ROI is already in percentage (~-20 to +30 range typically)
+        # Scale to ~0-10 range: (roi + 20) / 5 maps -20 to 0 and +30 to 10
+        roi_normalized = (roi + 20) / 5
+        roi_normalized = max(0, min(10, roi_normalized))  # Clamp to 0-10
+        fitness = roi_normalized * w_roi
         
-        # Trend: typically small (e.g., 0.1%/day), multiply by 10 to scale
-        fitness += (trend * 10) * w_trend
+        # Trend: typically -1 to +1 %/day, scale to 0-10 range
+        # (trend + 1) * 5 maps -1 to 0 and +1 to 10
+        trend_normalized = (trend + 1) * 5
+        trend_normalized = max(0, min(10, trend_normalized))
+        fitness += trend_normalized * w_trend
         
-        # Sharpe: typically 0-3, multiply by 5 to scale to ~0-15
-        fitness += (sharpe * 5) * w_sharpe
+        # Sharpe: typically -2 to +3, scale to 0-10 range
+        # (sharpe + 2) * 2 maps -2 to 0 and +3 to 10
+        sharpe_normalized = (sharpe + 2) * 2
+        sharpe_normalized = max(0, min(10, sharpe_normalized))
+        fitness += sharpe_normalized * w_sharpe
         
-        # Calibration: ECE 0.01 = excellent, 0.1 = poor
-        # Invert and scale: lower ECE = higher fitness
-        calibration_score = max(0, (ECE_THRESHOLD - ece) * 100)  # 0.01 ECE -> 9, 0.1 ECE -> 0
-        fitness += calibration_score * w_calibration
+        # Calibration: ECE 0 = perfect, higher = worse
+        # Use inverse scaling: 10 / (1 + ece * 50) gives continuous scale
+        # ECE=0 -> 10, ECE=0.02 -> 5, ECE=0.1 -> 1.67, ECE=0.2 -> 0.91
+        if ece is not None:
+            calibration_normalized = 10 / (1 + ece * 50)
+        else:
+            calibration_normalized = 5  # Default to middle
+        fitness += calibration_normalized * w_calibration
         
         # Consistency: lower variance is better
-        # variance 0.001 = excellent, 0.01 = poor
-        consistency_score = max(0, (VARIANCE_THRESHOLD - consistency_var) * 1000)  # 0.001 -> 9, 0.01 -> 0
-        fitness += consistency_score * w_consistency
+        # Use inverse scaling: 10 / (1 + variance * 500)
+        # variance=0 -> 10, variance=0.001 -> 6.67, variance=0.01 -> 1.67
+        if consistency_var is not None:
+            consistency_normalized = 10 / (1 + consistency_var * 500)
+        else:
+            consistency_normalized = 5  # Default to middle
+        fitness += consistency_normalized * w_consistency
         
         # AUC-ROC: 0.5 = random, 1.0 = perfect
-        # Scale to ~0-20 range
-        auc_score = (auc - 0.5) * 40  # 0.5 -> 0, 0.75 -> 10, 1.0 -> 20
-        fitness += auc_score * w_auc
+        # Scale directly: (auc - 0.5) * 20 maps 0.5 to 0 and 1.0 to 10
+        auc_normalized = (auc - 0.5) * 20
+        auc_normalized = max(0, min(10, auc_normalized))
+        fitness += auc_normalized * w_auc
         
         return fitness
     
@@ -1429,7 +1443,7 @@ def ga_search_params_roi(
             print(
                 f"Gen {gen + 1:02d}, best ROI={roi:+.2f}%, Trend={trend_str}, "
                 f"Sharpe={sharpe_str}, WinRate={win_rate_str}, Bets={num_bets}, "
-                f"range=[{min_fitness:+.2f}%, {max_fitness:+.2f}%]"
+                f"fitness_range=[{min_fitness:.2f}, {max_fitness:.2f}]"
             )
             
             # Print accuracy, log loss, brier score for best params
@@ -1452,7 +1466,8 @@ def ga_search_params_roi(
                 print(f"  {ece_str}, {auc_str}, {slope_str}")
             
             if is_new_best:
-                print(f"  *** NEW BEST: k={gen_best['params']['k']:.1f}, ROI={roi:+.2f}%")
+                fitness_str = f", Fitness={gen_best['fitness']:.2f}" if fitness_weights else ""
+                print(f"  *** NEW BEST: k={gen_best['params']['k']:.1f}, ROI={roi:+.2f}%{fitness_str}")
         
         if return_all_results:
             ext = gen_best.get("extended", {})
