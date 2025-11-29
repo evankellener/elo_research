@@ -687,7 +687,10 @@ class TestGASearchParamsROIExtendedResults(unittest.TestCase):
         # Check that extended metrics are in generation results
         extended_keys = ['best_roi_percent', 'best_trend', 'best_sharpe_ratio',
                         'best_min_roi', 'best_max_roi', 'best_win_rate', 'best_num_bets',
-                        'best_accuracy', 'best_log_loss', 'best_brier_score']
+                        'best_accuracy', 'best_log_loss', 'best_brier_score',
+                        # Comprehensive metrics (new)
+                        'best_ece', 'best_calibration_slope', 'best_auc_roc',
+                        'best_consistency_variance', 'best_max_drawdown']
         
         for gen_result in all_results:
             for key in extended_keys:
@@ -716,6 +719,40 @@ class TestGASearchParamsROIExtendedResults(unittest.TestCase):
             seed=42,
             verbose=False,
             fitness_weights={'roi': 0.6, 'trend': 0.3, 'sharpe': 0.1}
+        )
+        
+        # Should not raise an error and should return valid results
+        self.assertIsInstance(best_params, dict)
+        self.assertIsInstance(best_roi, float)
+    
+    @unittest.skipIf(not os.path.exists(_DATA_FILE), "interleaved_cleaned.csv not found")
+    def test_comprehensive_fitness_weights(self):
+        """Test that comprehensive fitness weights work (calibration, consistency, AUC)"""
+        df = pd.read_csv(self.data_file, low_memory=False)
+        odds_df = pd.read_csv(self.odds_file, low_memory=False)
+        odds_df = odds_df.rename(columns={'date': 'DATE', 'fighter': 'FIGHTER', 'opp_fighter': 'opp_FIGHTER'})
+        
+        df['result'] = pd.to_numeric(df['result'], errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize(None)
+        df = df.sort_values('DATE').reset_index(drop=True)
+        df = add_bout_counts(df)
+        
+        odds_df['DATE'] = pd.to_datetime(odds_df['DATE']).dt.tz_localize(None)
+        
+        # Test with comprehensive multi-metric weights
+        best_params, best_roi = ga_search_params_roi(
+            df,
+            odds_df,
+            population_size=3,
+            generations=1,
+            seed=42,
+            verbose=False,
+            fitness_weights={
+                'roi': 0.4,
+                'calibration': 0.2,
+                'consistency': 0.2,
+                'auc': 0.2
+            }
         )
         
         # Should not raise an error and should return valid results

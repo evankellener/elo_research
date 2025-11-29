@@ -1,5 +1,6 @@
 import random
 import math
+import json
 import pandas as pd
 import numpy as np
 import unicodedata
@@ -8,6 +9,11 @@ from functools import partial
 from elo_utils import (
     mov_factor, build_fighter_history, has_prior_history, add_bout_counts, apply_decay,
     apply_multiphase_decay, build_fighter_weight_history, detect_weight_change, calculate_expected_value
+)
+from prediction_metrics import (
+    compute_comprehensive_metrics, compute_composite_fitness,
+    compute_all_calibration_metrics, compute_all_consistency_metrics,
+    compute_all_performance_metrics, compute_all_bet_quality_metrics
 )
 
 
@@ -1092,7 +1098,14 @@ def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=Fa
                 'accuracy': None,
                 'log_loss': None,
                 'brier_score': None,
-                'df_with_elo': df_with_elo
+                'df_with_elo': df_with_elo,
+                # Comprehensive metrics (new)
+                'ece': None,
+                'calibration_slope': None,
+                'auc_roc': None,
+                'consistency_variance': None,
+                'max_drawdown': None,
+                'comprehensive_metrics': None
             }
         return 0.0
     
@@ -1105,6 +1118,9 @@ def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=Fa
     extended = compute_extended_roi_metrics(bet_records)
     prediction_metrics = compute_prediction_metrics(df_with_elo, odds_df, lookback_days)
     
+    # Compute comprehensive metrics (calibration, consistency, performance, betting)
+    comprehensive = compute_comprehensive_metrics(df_with_elo, bet_records, odds_df)
+    
     return {
         'roi_percent': roi_percent,
         'trend': extended['trend'],
@@ -1116,7 +1132,14 @@ def evaluate_params_roi(df, odds_df, params, lookback_days=0, return_extended=Fa
         'accuracy': prediction_metrics['accuracy'],
         'log_loss': prediction_metrics['log_loss'],
         'brier_score': prediction_metrics['brier_score'],
-        'df_with_elo': df_with_elo
+        'df_with_elo': df_with_elo,
+        # Comprehensive metrics (new)
+        'ece': comprehensive['calibration']['ece'],
+        'calibration_slope': comprehensive['calibration']['calibration_slope'],
+        'auc_roc': comprehensive['performance']['auc_roc'],
+        'consistency_variance': comprehensive['consistency']['overall_variance'],
+        'max_drawdown': comprehensive['betting']['drawdown']['max_drawdown'],
+        'comprehensive_metrics': comprehensive
     }
 
 
@@ -1246,25 +1269,71 @@ def ga_search_params_roi(
     all_results = []
     
     def compute_fitness(extended_metrics):
-        """Compute fitness from extended metrics, optionally using multi-objective weights."""
+        """Compute fitness from extended metrics, optionally using multi-objective weights.
+        
+        Supports comprehensive metric weights including:
+        - roi: Return on investment
+        - trend: ROI trend over time
+        - sharpe: Sharpe ratio
+        - calibration: Expected Calibration Error (lower is better)
+        - consistency: Prediction consistency across subsets (lower variance is better)
+        - auc: AUC-ROC score
+        """
         roi = extended_metrics['roi_percent']
         
         if not fitness_weights:
             return roi
         
+        # Default fitness weights for multi-metric optimization
+        # (imported constants define: DEFAULT_ECE_THRESHOLD=0.1, DEFAULT_VARIANCE_THRESHOLD=0.01)
+        default_weights = {'roi': 0.4, 'trend': 0.1, 'sharpe': 0.1, 'calibration': 0.15, 'consistency': 0.15, 'auc': 0.1}
+        
         # Normalize weights
         total_weight = sum(fitness_weights.values())
-        w_roi = fitness_weights.get('roi', 0.6) / total_weight
-        w_trend = fitness_weights.get('trend', 0.3) / total_weight
-        w_sharpe = fitness_weights.get('sharpe', 0.1) / total_weight
+        w_roi = fitness_weights.get('roi', default_weights['roi']) / total_weight
+        w_trend = fitness_weights.get('trend', default_weights['trend']) / total_weight
+        w_sharpe = fitness_weights.get('sharpe', default_weights['sharpe']) / total_weight
+        w_calibration = fitness_weights.get('calibration', default_weights['calibration']) / total_weight
+        w_consistency = fitness_weights.get('consistency', default_weights['consistency']) / total_weight
+        w_auc = fitness_weights.get('auc', default_weights['auc']) / total_weight
         
-        # Get metrics (use 0 if None)
+        # Get metrics (use defaults if None)
+        # ECE threshold: 0.1 is poor calibration, 0.01 is excellent
+        # Variance threshold: 0.01 is inconsistent, 0.001 is excellent
+        ECE_THRESHOLD = 0.1
+        VARIANCE_THRESHOLD = 0.01
+        
         trend = extended_metrics.get('trend') or 0
         sharpe = extended_metrics.get('sharpe_ratio') or 0
+        ece = extended_metrics.get('ece') or ECE_THRESHOLD
+        consistency_var = extended_metrics.get('consistency_variance') or VARIANCE_THRESHOLD
+        auc = extended_metrics.get('auc_roc') or 0.5
         
-        # Weighted combination (scale trend to similar magnitude as ROI)
-        # Trend is typically small (e.g., 0.1%/day), multiply by 10 to make it comparable
-        fitness = (roi * w_roi) + (trend * 10 * w_trend) + (sharpe * w_sharpe)
+        # Weighted combination (scale each to similar magnitude as ROI ~= -10 to +20)
+        # ROI is already in percentage
+        fitness = roi * w_roi
+        
+        # Trend: typically small (e.g., 0.1%/day), multiply by 10 to scale
+        fitness += (trend * 10) * w_trend
+        
+        # Sharpe: typically 0-3, multiply by 5 to scale to ~0-15
+        fitness += (sharpe * 5) * w_sharpe
+        
+        # Calibration: ECE 0.01 = excellent, 0.1 = poor
+        # Invert and scale: lower ECE = higher fitness
+        calibration_score = max(0, (ECE_THRESHOLD - ece) * 100)  # 0.01 ECE -> 9, 0.1 ECE -> 0
+        fitness += calibration_score * w_calibration
+        
+        # Consistency: lower variance is better
+        # variance 0.001 = excellent, 0.01 = poor
+        consistency_score = max(0, (VARIANCE_THRESHOLD - consistency_var) * 1000)  # 0.001 -> 9, 0.01 -> 0
+        fitness += consistency_score * w_consistency
+        
+        # AUC-ROC: 0.5 = random, 1.0 = perfect
+        # Scale to ~0-20 range
+        auc_score = (auc - 0.5) * 40  # 0.5 -> 0, 0.75 -> 10, 1.0 -> 20
+        fitness += auc_score * w_auc
+        
         return fitness
     
     def evaluate_individual(params):
@@ -1372,6 +1441,16 @@ def ga_search_params_roi(
                     f"  Accuracy: {accuracy*100:.1f}%, LogLoss: {log_loss:.3f}, BrierScore: {brier_score:.3f}"
                 )
             
+            # Print comprehensive metrics if available
+            ece = ext.get('ece')
+            auc = ext.get('auc_roc')
+            calib_slope = ext.get('calibration_slope')
+            if ece is not None or auc is not None:
+                ece_str = f"ECE={ece:.4f}" if ece is not None else "ECE=N/A"
+                auc_str = f"AUC={auc:.3f}" if auc is not None else "AUC=N/A"
+                slope_str = f"CalibSlope={calib_slope:.2f}" if calib_slope is not None else "CalibSlope=N/A"
+                print(f"  {ece_str}, {auc_str}, {slope_str}")
+            
             if is_new_best:
                 print(f"  *** NEW BEST: k={gen_best['params']['k']:.1f}, ROI={roi:+.2f}%")
         
@@ -1395,6 +1474,12 @@ def ga_search_params_roi(
                 'best_accuracy': ext.get('accuracy'),
                 'best_log_loss': ext.get('log_loss'),
                 'best_brier_score': ext.get('brier_score'),
+                # Comprehensive metrics (new)
+                'best_ece': ext.get('ece'),
+                'best_calibration_slope': ext.get('calibration_slope'),
+                'best_auc_roc': ext.get('auc_roc'),
+                'best_consistency_variance': ext.get('consistency_variance'),
+                'best_max_drawdown': ext.get('max_drawdown'),
             }
             all_results.append(gen_summary)
     
@@ -1875,6 +1960,212 @@ def ga_search_params(
     return best_ind["params"], best_ind["fitness"], cutoff_date
 
 
+def save_comprehensive_results(output_path, best_params, best_fitness, extended_metrics,
+                               all_results=None, config_name="default"):
+    """
+    Save comprehensive GA results to a JSON file.
+    
+    This function creates a detailed results file with:
+    - Best configuration parameters
+    - All metrics (ROI, accuracy, calibration, consistency, etc.)
+    - Calibration curve data for plotting
+    - Consistency breakdown by tier, method, time
+    - Per-generation evolution data
+    
+    Args:
+        output_path: Path to save the JSON file
+        best_params: Dict of best GA parameters
+        best_fitness: Best fitness value achieved
+        extended_metrics: Dict from evaluate_params_roi with return_extended=True
+        all_results: Optional list of per-generation results
+        config_name: Name identifier for this configuration
+    
+    Returns:
+        dict: The saved results structure
+    """
+    # Convert numpy types to native Python types for JSON serialization
+    def convert_to_serializable(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        elif isinstance(obj, pd.Period):
+            return str(obj)
+        elif isinstance(obj, dict):
+            return {k: convert_to_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_to_serializable(v) for v in obj]
+        elif pd.isna(obj):
+            return None
+        return obj
+    
+    # Build calibration curve data for plotting
+    calibration_data = None
+    comprehensive = extended_metrics.get('comprehensive_metrics')
+    if comprehensive:
+        bin_data = comprehensive.get('calibration', {}).get('bin_data', [])
+        if bin_data:
+            calibration_data = {
+                'bins': [
+                    {
+                        'range': f"{int(b['bin_lower']*100)}-{int(b['bin_upper']*100)}%",
+                        'predicted': b['avg_predicted'],
+                        'actual': b['actual_rate'],
+                        'count': b['count']
+                    }
+                    for b in bin_data
+                ]
+            }
+    
+    # Build consistency breakdown
+    consistency_breakdown = None
+    if comprehensive:
+        consistency = comprehensive.get('consistency', {})
+        consistency_breakdown = {
+            'by_elo_tier': consistency.get('by_elo_tier', {}).get('tiers', {}),
+            'by_method': consistency.get('by_method', {}).get('methods', {}),
+            'by_time_period': consistency.get('by_time_period', {}).get('periods', {}),
+            'by_experience_gap': consistency.get('by_experience_gap', {}).get('gaps', {}),
+        }
+    
+    # Build ROI by decile data
+    roi_by_decile = None
+    if comprehensive:
+        perf = comprehensive.get('performance', {})
+        roi_by_decile = perf.get('roi_by_decile', {}).get('deciles', {})
+    
+    results = {
+        'config_name': config_name,
+        'timestamp': pd.Timestamp.now().isoformat(),
+        
+        # Core results
+        'best_params': convert_to_serializable(best_params),
+        'best_fitness': convert_to_serializable(best_fitness),
+        
+        # Summary metrics
+        'summary': {
+            'roi_percent': convert_to_serializable(extended_metrics.get('roi_percent')),
+            'accuracy': convert_to_serializable(extended_metrics.get('accuracy')),
+            'sharpe_ratio': convert_to_serializable(extended_metrics.get('sharpe_ratio')),
+            'win_rate': convert_to_serializable(extended_metrics.get('win_rate')),
+            'num_bets': convert_to_serializable(extended_metrics.get('num_bets')),
+            # Calibration
+            'ece': convert_to_serializable(extended_metrics.get('ece')),
+            'brier_score': convert_to_serializable(extended_metrics.get('brier_score')),
+            'log_loss': convert_to_serializable(extended_metrics.get('log_loss')),
+            'calibration_slope': convert_to_serializable(extended_metrics.get('calibration_slope')),
+            # Performance
+            'auc_roc': convert_to_serializable(extended_metrics.get('auc_roc')),
+            # Consistency
+            'consistency_variance': convert_to_serializable(extended_metrics.get('consistency_variance')),
+            # Betting
+            'max_drawdown': convert_to_serializable(extended_metrics.get('max_drawdown')),
+        },
+        
+        # Detailed calibration curve data for plotting
+        'calibration_curve': convert_to_serializable(calibration_data),
+        
+        # Consistency breakdown by dimension
+        'consistency_breakdown': convert_to_serializable(consistency_breakdown),
+        
+        # ROI by confidence decile
+        'roi_by_decile': convert_to_serializable(roi_by_decile),
+        
+        # Per-generation evolution (if available)
+        'evolution': convert_to_serializable(all_results) if all_results else None,
+        
+        # Full comprehensive metrics (for detailed analysis)
+        'comprehensive_metrics': convert_to_serializable(comprehensive) if comprehensive else None,
+    }
+    
+    # Save to file
+    with open(output_path, 'w') as f:
+        json.dump(results, f, indent=2, default=str)
+    
+    return results
+
+
+def print_comprehensive_summary(extended_metrics):
+    """
+    Print a human-readable summary of all metrics.
+    
+    Args:
+        extended_metrics: Dict from evaluate_params_roi with return_extended=True
+    """
+    print("\n" + "="*60)
+    print("COMPREHENSIVE METRICS SUMMARY")
+    print("="*60)
+    
+    # Core Metrics
+    print("\n--- Core Metrics ---")
+    print(f"ROI: {extended_metrics.get('roi_percent', 0):.2f}%")
+    print(f"Accuracy: {extended_metrics.get('accuracy', 0)*100:.1f}%")
+    print(f"Win Rate: {extended_metrics.get('win_rate', 0)*100:.0f}%")
+    print(f"Sharpe Ratio: {extended_metrics.get('sharpe_ratio', 'N/A')}")
+    print(f"Trend: {extended_metrics.get('trend', 'N/A')}")
+    
+    # Calibration Metrics
+    print("\n--- Calibration Metrics ---")
+    print(f"Expected Calibration Error (ECE): {extended_metrics.get('ece', 'N/A')}")
+    print(f"Brier Score: {extended_metrics.get('brier_score', 'N/A')}")
+    print(f"Log Loss: {extended_metrics.get('log_loss', 'N/A')}")
+    calib_slope = extended_metrics.get('calibration_slope')
+    if calib_slope:
+        status = "WELL CALIBRATED"
+        if calib_slope < 0.9:
+            status = "OVERCONFIDENT"
+        elif calib_slope > 1.1:
+            status = "UNDERCONFIDENT"
+        print(f"Calibration Slope: {calib_slope:.2f} ({status})")
+    
+    # Performance Metrics
+    print("\n--- Performance Metrics ---")
+    print(f"AUC-ROC: {extended_metrics.get('auc_roc', 'N/A')}")
+    
+    # Consistency Metrics
+    print("\n--- Consistency Metrics ---")
+    cons_var = extended_metrics.get('consistency_variance')
+    if cons_var is not None:
+        status = "CONSISTENT" if cons_var < 0.005 else "HIGH VARIANCE"
+        print(f"Consistency Variance: {cons_var:.4f} ({status})")
+    
+    # Betting Metrics
+    print("\n--- Betting Metrics ---")
+    print(f"Max Drawdown: ${extended_metrics.get('max_drawdown', 'N/A')}")
+    
+    # Comprehensive metrics details
+    comprehensive = extended_metrics.get('comprehensive_metrics')
+    if comprehensive:
+        # Calibration curve summary
+        bin_data = comprehensive.get('calibration', {}).get('bin_data', [])
+        if bin_data:
+            print("\n--- Calibration Curve ---")
+            for b in bin_data:
+                if b['count'] > 0:
+                    pred = b['avg_predicted']
+                    actual = b['actual_rate'] or 0
+                    diff = abs(pred - actual) if b['actual_rate'] else None
+                    diff_str = f"(diff: {diff:.2f})" if diff else ""
+                    print(f"  {int(b['bin_lower']*100):2d}-{int(b['bin_upper']*100):3d}%: "
+                          f"pred={pred:.2f}, actual={actual:.2f}, n={b['count']} {diff_str}")
+        
+        # High variance flags
+        flags = comprehensive.get('consistency', {}).get('high_variance_flags', [])
+        if flags:
+            print(f"\n⚠️  HIGH VARIANCE FLAGS: {', '.join(flags)}")
+        
+        # Time trend
+        time_data = comprehensive.get('consistency', {}).get('by_time_period', {})
+        if time_data.get('is_degrading'):
+            print("\n⚠️  WARNING: Accuracy appears to be degrading over time")
+    
+    print("\n" + "="*60)
+
+
 # =========================
 # Main
 # =========================
@@ -1911,12 +2202,41 @@ if __name__ == "__main__":
                         help="Enable Elo denominator optimization (default: off). "
                              "Makes the '400' constant in Elo equation a GA-optimizable variable.")
     
+    # Multi-metric optimization options
+    parser.add_argument("--fitness-mode", choices=["roi", "multi"], default="roi",
+                        dest="fitness_mode",
+                        help="Fitness evaluation mode: 'roi' for ROI-only, 'multi' for weighted multi-metric. "
+                             "When 'multi', uses --fitness-weights to combine ROI, calibration, consistency, and AUC.")
+    parser.add_argument("--fitness-weights", type=str, default=None,
+                        dest="fitness_weights",
+                        help="Weights for multi-metric fitness (JSON format). "
+                             "Example: '{\"roi\": 0.4, \"calibration\": 0.2, \"consistency\": 0.2, \"auc\": 0.2}'")
+    parser.add_argument("--output-json", type=str, default=None,
+                        dest="output_json",
+                        help="Path to save comprehensive results JSON file.")
+    parser.add_argument("--show-comprehensive", action="store_true",
+                        dest="show_comprehensive",
+                        help="Show comprehensive metrics summary after optimization.")
+    
     args = parser.parse_args()
     
     # Convert on/off to boolean
     multiphase_decay = args.multiphase_decay == "on"
     weight_adjust = args.weight_adjust == "on"
     optimize_elo_denom = args.optimize_elo_denom == "on"
+    
+    # Parse fitness weights if provided
+    fitness_weights = None
+    if args.fitness_mode == "multi":
+        if args.fitness_weights:
+            try:
+                fitness_weights = json.loads(args.fitness_weights)
+            except json.JSONDecodeError:
+                print(f"Warning: Could not parse --fitness-weights '{args.fitness_weights}'. Using defaults.")
+                fitness_weights = {'roi': 0.4, 'calibration': 0.2, 'consistency': 0.2, 'auc': 0.2}
+        else:
+            # Default multi-metric weights
+            fitness_weights = {'roi': 0.4, 'calibration': 0.2, 'consistency': 0.2, 'auc': 0.2}
     
     df = pd.read_csv("data/interleaved_cleaned.csv", low_memory=False)
     test_df = pd.read_csv("data/past3_events.csv", low_memory=False)
@@ -1971,10 +2291,14 @@ if __name__ == "__main__":
         total_odds_fights = len(odds_df[['DATE', 'FIGHTER', 'opp_FIGHTER']].drop_duplicates()) // 2
         print(f"Total fights with odds data: ~{total_odds_fights}")
         print(f"Total historical fights: {len(df)}")
+        if fitness_weights:
+            print(f"Fitness mode: multi-metric with weights: {fitness_weights}")
+        else:
+            print(f"Fitness mode: ROI-only")
         print("Calling ga_search_params_roi()...")
         
         # Run ROI-based GA search with lookback_days parameter and decay_mode
-        best_params, best_roi = ga_search_params_roi(
+        best_params, best_roi, all_results = ga_search_params_roi(
             df,
             odds_df,
             test_df=test_df,
@@ -1986,6 +2310,8 @@ if __name__ == "__main__":
             multiphase_decay=multiphase_decay,
             weight_adjust=weight_adjust,
             optimize_elo_denom=optimize_elo_denom,
+            fitness_weights=fitness_weights,
+            return_all_results=True,
         )
 
         print("\n=== GA best params (ROI-optimized) ===")
@@ -2077,6 +2403,32 @@ if __name__ == "__main__":
             min_train_bouts=1,
         )
         print("Overall OOS accuracy:", oos_acc)
+        
+        # Compute comprehensive metrics on final trained model
+        print("\n=== Computing Comprehensive Metrics ===")
+        final_extended = evaluate_params_roi(
+            df, odds_df, best_params, lookback_days=args.lookback_days,
+            return_extended=True, decay_mode=args.decay_mode,
+            multiphase_decay=multiphase_decay, weight_adjust=weight_adjust,
+            optimize_elo_denom=optimize_elo_denom, weight_history=weight_history
+        )
+        
+        # Show comprehensive summary if requested
+        if args.show_comprehensive:
+            print_comprehensive_summary(final_extended)
+        
+        # Save to JSON if output path provided
+        if args.output_json:
+            print(f"\nSaving comprehensive results to: {args.output_json}")
+            save_comprehensive_results(
+                args.output_json,
+                best_params,
+                best_roi,
+                final_extended,
+                all_results,
+                config_name=f"ga_roi_{args.lookback_days}d"
+            )
+            print(f"Results saved successfully!")
     else:
         # Original accuracy-based GA
         print("\n" + "="*60)
