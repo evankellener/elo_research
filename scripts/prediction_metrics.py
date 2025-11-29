@@ -16,6 +16,30 @@ from elo_utils import build_fighter_history, has_prior_history
 
 
 # =========================
+# Constants for Fitness Scoring
+# =========================
+
+# Default fitness weights for multi-metric optimization
+DEFAULT_FITNESS_WEIGHTS = {
+    'roi': 0.4,
+    'accuracy': 0.2,
+    'calibration': 0.15,
+    'consistency': 0.15,
+    'auc': 0.1
+}
+
+# ECE (Expected Calibration Error) thresholds and scaling
+# ECE of 0.01 = excellent calibration, 0.1 = poor calibration
+DEFAULT_ECE_THRESHOLD = 0.1
+ECE_SCALE_FACTOR = 1000  # Scales ECE score to comparable range with ROI
+
+# Consistency variance thresholds and scaling
+# Variance of 0.001 = very consistent, 0.01 = inconsistent
+DEFAULT_VARIANCE_THRESHOLD = 0.01
+VARIANCE_SCALE_FACTOR = 10000  # Scales consistency score to comparable range with ROI
+
+
+# =========================
 # Calibration Metrics
 # =========================
 
@@ -467,7 +491,7 @@ def compute_consistency_by_time_period(df_with_elo, period='M'):
     
     if len(periods_with_accuracy) >= 3:
         x = np.arange(len(periods_with_accuracy))
-        y = np.array([p[1] for p in periods_with_accuracy])
+        y = np.array([accuracy for _, accuracy in periods_with_accuracy])
         
         x_mean = np.mean(x)
         y_mean = np.mean(y)
@@ -1313,19 +1337,11 @@ def compute_composite_fitness(metrics, weights=None):
     Returns:
         float: Composite fitness score (higher is better)
     """
-    default_weights = {
-        'roi': 0.4,
-        'accuracy': 0.2,
-        'calibration': 0.15,
-        'consistency': 0.15,
-        'auc': 0.1
-    }
-    
     if weights is None:
-        weights = default_weights.copy()
+        weights = DEFAULT_FITNESS_WEIGHTS.copy()
     else:
         # Merge with defaults for any missing keys
-        merged = default_weights.copy()
+        merged = DEFAULT_FITNESS_WEIGHTS.copy()
         merged.update(weights)
         weights = merged
     
@@ -1344,15 +1360,15 @@ def compute_composite_fitness(metrics, weights=None):
     fitness += weights.get('accuracy', 0) * (accuracy * 100)  # Convert to percentage
     
     # Calibration component (lower ECE is better, so invert and scale)
-    ece = metrics.get('summary', {}).get('ece', 0.1) or 0.1
+    ece = metrics.get('summary', {}).get('ece', DEFAULT_ECE_THRESHOLD) or DEFAULT_ECE_THRESHOLD
     # Scale: ECE of 0.01 = 99, ECE of 0.1 = 0, ECE of 0.05 = 50
-    calibration_score = max(0, (0.1 - ece) * 1000)
+    calibration_score = max(0, (DEFAULT_ECE_THRESHOLD - ece) * ECE_SCALE_FACTOR)
     fitness += weights.get('calibration', 0) * calibration_score
     
     # Consistency component (lower variance is better)
-    variance = metrics.get('summary', {}).get('consistency_variance', 0.01) or 0.01
+    variance = metrics.get('summary', {}).get('consistency_variance', DEFAULT_VARIANCE_THRESHOLD) or DEFAULT_VARIANCE_THRESHOLD
     # Scale: variance of 0.001 = 90, variance of 0.01 = 0
-    consistency_score = max(0, (0.01 - variance) * 10000)
+    consistency_score = max(0, (DEFAULT_VARIANCE_THRESHOLD - variance) * VARIANCE_SCALE_FACTOR)
     fitness += weights.get('consistency', 0) * consistency_score
     
     # AUC-ROC component (scale to similar magnitude)

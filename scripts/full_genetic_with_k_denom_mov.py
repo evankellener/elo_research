@@ -1284,20 +1284,29 @@ def ga_search_params_roi(
         if not fitness_weights:
             return roi
         
+        # Default fitness weights for multi-metric optimization
+        # (imported constants define: DEFAULT_ECE_THRESHOLD=0.1, DEFAULT_VARIANCE_THRESHOLD=0.01)
+        default_weights = {'roi': 0.4, 'trend': 0.1, 'sharpe': 0.1, 'calibration': 0.15, 'consistency': 0.15, 'auc': 0.1}
+        
         # Normalize weights
         total_weight = sum(fitness_weights.values())
-        w_roi = fitness_weights.get('roi', 0.4) / total_weight
-        w_trend = fitness_weights.get('trend', 0.1) / total_weight
-        w_sharpe = fitness_weights.get('sharpe', 0.1) / total_weight
-        w_calibration = fitness_weights.get('calibration', 0.15) / total_weight
-        w_consistency = fitness_weights.get('consistency', 0.15) / total_weight
-        w_auc = fitness_weights.get('auc', 0.1) / total_weight
+        w_roi = fitness_weights.get('roi', default_weights['roi']) / total_weight
+        w_trend = fitness_weights.get('trend', default_weights['trend']) / total_weight
+        w_sharpe = fitness_weights.get('sharpe', default_weights['sharpe']) / total_weight
+        w_calibration = fitness_weights.get('calibration', default_weights['calibration']) / total_weight
+        w_consistency = fitness_weights.get('consistency', default_weights['consistency']) / total_weight
+        w_auc = fitness_weights.get('auc', default_weights['auc']) / total_weight
         
         # Get metrics (use defaults if None)
+        # ECE threshold: 0.1 is poor calibration, 0.01 is excellent
+        # Variance threshold: 0.01 is inconsistent, 0.001 is excellent
+        ECE_THRESHOLD = 0.1
+        VARIANCE_THRESHOLD = 0.01
+        
         trend = extended_metrics.get('trend') or 0
         sharpe = extended_metrics.get('sharpe_ratio') or 0
-        ece = extended_metrics.get('ece') or 0.1  # Default ECE if not calculated
-        consistency_var = extended_metrics.get('consistency_variance') or 0.01
+        ece = extended_metrics.get('ece') or ECE_THRESHOLD
+        consistency_var = extended_metrics.get('consistency_variance') or VARIANCE_THRESHOLD
         auc = extended_metrics.get('auc_roc') or 0.5
         
         # Weighted combination (scale each to similar magnitude as ROI ~= -10 to +20)
@@ -1312,12 +1321,12 @@ def ga_search_params_roi(
         
         # Calibration: ECE 0.01 = excellent, 0.1 = poor
         # Invert and scale: lower ECE = higher fitness
-        calibration_score = max(0, (0.1 - ece) * 100)  # 0.01 ECE -> 9, 0.1 ECE -> 0
+        calibration_score = max(0, (ECE_THRESHOLD - ece) * 100)  # 0.01 ECE -> 9, 0.1 ECE -> 0
         fitness += calibration_score * w_calibration
         
         # Consistency: lower variance is better
         # variance 0.001 = excellent, 0.01 = poor
-        consistency_score = max(0, (0.01 - consistency_var) * 1000)  # 0.001 -> 9, 0.01 -> 0
+        consistency_score = max(0, (VARIANCE_THRESHOLD - consistency_var) * 1000)  # 0.001 -> 9, 0.01 -> 0
         fitness += consistency_score * w_consistency
         
         # AUC-ROC: 0.5 = random, 1.0 = perfect
