@@ -1377,12 +1377,13 @@ def ga_search_params_roi(
         fitnesses = [ind["fitness"] for ind in population]
         avg_fitness = sum(fitnesses) / len(fitnesses)
         ext = best_ind.get("extended", {})
+        roi = ext.get('roi_percent', 0)
         trend_str = f"{ext.get('trend', 0):.2f}%/day" if ext.get('trend') is not None else "N/A"
         sharpe_str = f"{ext.get('sharpe_ratio', 0):.2f}" if ext.get('sharpe_ratio') is not None else "N/A"
         win_rate_str = f"{ext.get('win_rate', 0)*100:.0f}%" if ext.get('win_rate') is not None else "N/A"
         num_bets = ext.get('num_bets', 0)
         print(
-            f"Initial population: best ROI={best_ind['fitness']:.2f}%, "
+            f"Initial population: best ROI={roi:.2f}%, "
             f"Trend={trend_str}, Sharpe={sharpe_str}, WinRate={win_rate_str}, Bets={num_bets}"
         )
     
