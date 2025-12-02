@@ -1,9 +1,11 @@
 import random
 import math
 import json
+import hashlib
 import pandas as pd
 import numpy as np
 import unicodedata
+from datetime import datetime
 from multiprocessing import Pool, cpu_count
 from functools import partial
 from elo_utils import (
@@ -15,6 +17,315 @@ from prediction_metrics import (
     compute_all_calibration_metrics, compute_all_consistency_metrics,
     compute_all_performance_metrics, compute_all_bet_quality_metrics
 )
+
+
+# =========================
+# Elo Computation Cache
+# =========================
+
+# Global cache for Elo computations keyed by (params_tuple, dataset_hash)
+_elo_cache = {}
+_elo_cache_hits = 0
+_elo_cache_misses = 0
+
+
+def _compute_dataset_hash(df):
+    """Compute a hash of the dataset for cache keying."""
+    # Use a simple hash of the dataset's shape and date range
+    date_range = f"{df['DATE'].min()}_{df['DATE'].max()}"
+    shape = f"{len(df)}"
+    return hashlib.md5(f"{shape}_{date_range}".encode()).hexdigest()[:16]
+
+
+def _params_to_tuple(params):
+    """Convert params dict to a hashable tuple."""
+    sorted_items = sorted(params.items())
+    return tuple((k, round(v, 6) if isinstance(v, float) else v) for k, v in sorted_items)
+
+
+def clear_elo_cache():
+    """Clear the Elo computation cache."""
+    global _elo_cache, _elo_cache_hits, _elo_cache_misses
+    _elo_cache = {}
+    _elo_cache_hits = 0
+    _elo_cache_misses = 0
+
+
+def get_cache_stats():
+    """Get cache hit/miss statistics."""
+    return {
+        'hits': _elo_cache_hits,
+        'misses': _elo_cache_misses,
+        'size': len(_elo_cache)
+    }
+
+
+# =========================
+# Fitness Weight Parsing and Normalization
+# =========================
+
+# Valid fitness weight keys
+VALID_FITNESS_WEIGHT_KEYS = {
+    'roi', 'accuracy', 'calibration', 'consistency', 'auc',
+    'trend', 'sharpe', 'log_loss', 'brier_score', 'ece'
+}
+
+# Default weights for multi-metric fitness
+DEFAULT_MULTI_METRIC_WEIGHTS = {
+    'roi': 0.4,
+    'accuracy': 0.15,
+    'calibration': 0.15,
+    'consistency': 0.15,
+    'auc': 0.15
+}
+
+
+def parse_fitness_weights(json_str):
+    """
+    Parse and validate fitness weights from a JSON string.
+    
+    Validates that:
+    1. The string is valid JSON
+    2. All keys are valid fitness metric names
+    3. All values are positive numbers
+    4. At least one weight is non-zero
+    
+    Normalizes weights to sum to 1.0.
+    
+    Args:
+        json_str: JSON string like '{"roi": 0.4, "calibration": 0.2, ...}'
+    
+    Returns:
+        dict: Validated and normalized weights
+    
+    Raises:
+        ValueError: If JSON is invalid or contains invalid keys/values
+    
+    Example:
+        >>> weights = parse_fitness_weights('{"roi": 0.4, "calibration": 0.3, "consistency": 0.3}')
+        >>> sum(weights.values())  # Always sums to 1.0
+        1.0
+    """
+    if json_str is None:
+        return DEFAULT_MULTI_METRIC_WEIGHTS.copy()
+    
+    try:
+        weights = json.loads(json_str)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Invalid JSON format for fitness weights: {e}. "
+            f"Expected format: '{{\"roi\": 0.4, \"calibration\": 0.2, ...}}'"
+        )
+    
+    if not isinstance(weights, dict):
+        raise ValueError(
+            f"Fitness weights must be a JSON object (dict), got {type(weights).__name__}"
+        )
+    
+    # Validate keys
+    invalid_keys = set(weights.keys()) - VALID_FITNESS_WEIGHT_KEYS
+    if invalid_keys:
+        raise ValueError(
+            f"Invalid fitness weight keys: {invalid_keys}. "
+            f"Valid keys are: {sorted(VALID_FITNESS_WEIGHT_KEYS)}"
+        )
+    
+    # Validate values
+    for key, value in weights.items():
+        if not isinstance(value, (int, float)):
+            raise ValueError(
+                f"Fitness weight '{key}' must be a number, got {type(value).__name__}"
+            )
+        if value < 0:
+            raise ValueError(
+                f"Fitness weight '{key}' must be non-negative, got {value}"
+            )
+    
+    # Check at least one non-zero weight
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        raise ValueError(
+            "At least one fitness weight must be positive (sum of weights must be > 0)"
+        )
+    
+    # Normalize to sum to 1.0
+    normalized = {k: v / total_weight for k, v in weights.items()}
+    
+    return normalized
+
+
+def normalize_metrics_for_fitness(metrics_dict):
+    """
+    Normalize each metric onto a 0-1 scale where higher is always better.
+    
+    This function maps raw metrics to normalized scores suitable for weighted
+    combination in multi-metric fitness. Each metric is transformed so that:
+    - 0.0 = worst possible value
+    - 1.0 = best possible value
+    
+    Metric Transformations:
+    -----------------------
+    
+    ROI (roi_percent):
+        - Raw: typically -30% to +30%
+        - Transform: sigmoid(roi/10), so ROI=0 -> 0.5, ROI=10 -> 0.73, ROI=-10 -> 0.27
+        - Rationale: Allows unbounded ROI values while keeping score bounded
+    
+    Accuracy:
+        - Raw: 0.0 to 1.0
+        - Transform: direct (already in correct range)
+        - Rationale: 50% is random baseline, 100% is perfect
+    
+    Log Loss:
+        - Raw: 0 (perfect) to infinity (terrible)
+        - Transform: 1 / (1 + log_loss), so log_loss=0 -> 1.0, log_loss=1 -> 0.5
+        - Rationale: Inverted so lower log_loss gives higher score
+    
+    Brier Score:
+        - Raw: 0 (perfect) to 1 (worst)
+        - Transform: 1 - brier_score
+        - Rationale: Direct inversion
+    
+    ECE (Expected Calibration Error):
+        - Raw: 0 (perfect calibration) to 1 (worst)
+        - Transform: 1 - (ece * 5), clamped to [0, 1]
+        - Rationale: ECE of 0.2 or higher maps to 0, ECE=0 maps to 1
+    
+    Calibration Slope:
+        - Raw: optimal is 1.0, < 1 = overconfident, > 1 = underconfident
+        - Transform: 1 - abs(slope - 1), clamped to [0, 1]
+        - Rationale: Penalizes deviation from perfect calibration in either direction
+    
+    AUC-ROC:
+        - Raw: 0.5 (random) to 1.0 (perfect)
+        - Transform: (auc - 0.5) * 2, so AUC=0.5 -> 0, AUC=1.0 -> 1.0
+        - Rationale: Random classifier is baseline at 0
+    
+    Consistency Variance:
+        - Raw: 0 (perfectly consistent) to ~0.1 (very inconsistent)
+        - Transform: 1 / (1 + variance * 100), so var=0 -> 1.0, var=0.01 -> 0.5
+        - Rationale: Inverted so lower variance gives higher score
+    
+    Max Drawdown:
+        - Raw: 0 (no drawdown) to large positive (bad)
+        - Transform: 1 / (1 + max_drawdown / 10)
+        - Rationale: Inverted so lower drawdown gives higher score
+    
+    Args:
+        metrics_dict: Dictionary containing raw metric values. Expected keys include:
+            - roi_percent, accuracy, log_loss, brier_score
+            - ece, calibration_slope, auc_roc
+            - consistency_variance, max_drawdown
+    
+    Returns:
+        dict: Dictionary with same keys but values normalized to [0, 1] scale
+              where higher is always better. Missing metrics default to 0.5.
+    
+    Example:
+        >>> raw = {'roi_percent': 5.0, 'ece': 0.02, 'auc_roc': 0.65}
+        >>> normalized = normalize_metrics_for_fitness(raw)
+        >>> all(0 <= v <= 1 for v in normalized.values())
+        True
+    """
+    normalized = {}
+    
+    # ROI: sigmoid transform
+    roi = metrics_dict.get('roi_percent', 0) or 0
+    normalized['roi'] = 1 / (1 + math.exp(-roi / 10))
+    
+    # Accuracy: direct (already 0-1)
+    accuracy = metrics_dict.get('accuracy', 0.5)
+    normalized['accuracy'] = accuracy if accuracy is not None else 0.5
+    
+    # Log Loss: inverse transform
+    log_loss = metrics_dict.get('log_loss')
+    if log_loss is not None:
+        normalized['log_loss'] = 1 / (1 + log_loss)
+    else:
+        normalized['log_loss'] = 0.5  # Default
+    
+    # Brier Score: direct inversion
+    brier = metrics_dict.get('brier_score')
+    if brier is not None:
+        normalized['brier_score'] = 1 - brier
+    else:
+        normalized['brier_score'] = 0.5
+    
+    # ECE: scaled inversion
+    ece = metrics_dict.get('ece')
+    if ece is not None:
+        normalized['ece'] = max(0, min(1, 1 - (ece * 5)))
+    else:
+        normalized['ece'] = 0.5
+    # Alias for convenience
+    normalized['calibration'] = normalized['ece']
+    
+    # Calibration Slope: deviation from 1.0
+    slope = metrics_dict.get('calibration_slope')
+    if slope is not None:
+        deviation = abs(slope - 1.0)
+        normalized['calibration_slope'] = max(0, min(1, 1 - deviation))
+    else:
+        normalized['calibration_slope'] = 0.5
+    
+    # AUC-ROC: scale from 0.5-1.0 to 0-1
+    auc = metrics_dict.get('auc_roc')
+    if auc is not None:
+        normalized['auc'] = (auc - 0.5) * 2
+        normalized['auc'] = max(0, min(1, normalized['auc']))
+    else:
+        normalized['auc'] = 0.5
+    
+    # Consistency Variance: inverse transform
+    variance = metrics_dict.get('consistency_variance')
+    if variance is not None:
+        normalized['consistency'] = 1 / (1 + variance * 100)
+    else:
+        normalized['consistency'] = 0.5
+    
+    # Max Drawdown: inverse transform
+    drawdown = metrics_dict.get('max_drawdown')
+    if drawdown is not None:
+        normalized['max_drawdown'] = 1 / (1 + drawdown / 10)
+    else:
+        normalized['max_drawdown'] = 0.5
+    
+    # Trend: sigmoid centered at 0
+    trend = metrics_dict.get('trend')
+    if trend is not None:
+        normalized['trend'] = 1 / (1 + math.exp(-trend * 5))
+    else:
+        normalized['trend'] = 0.5
+    
+    # Sharpe Ratio: sigmoid transform
+    sharpe = metrics_dict.get('sharpe_ratio')
+    if sharpe is not None:
+        normalized['sharpe'] = 1 / (1 + math.exp(-sharpe))
+    else:
+        normalized['sharpe'] = 0.5
+    
+    return normalized
+
+
+def compute_weighted_fitness(metrics_dict, weights):
+    """
+    Compute weighted fitness score from metrics.
+    
+    Args:
+        metrics_dict: Dictionary of raw metrics from evaluate_params_roi
+        weights: Dictionary of normalized weights (must sum to 1.0)
+    
+    Returns:
+        float: Weighted fitness score in range [0, 1]
+    """
+    normalized = normalize_metrics_for_fitness(metrics_dict)
+    
+    fitness = 0.0
+    for key, weight in weights.items():
+        if key in normalized:
+            fitness += normalized[key] * weight
+    
+    return fitness
 
 
 def normalize_name(name):
@@ -732,6 +1043,8 @@ def compute_prediction_metrics(df_with_elo, odds_df, lookback_days=0):
     """
     Compute accuracy, log loss, and Brier score for Elo predictions.
     
+    Includes robust error handling - returns conservative defaults on failure.
+    
     Args:
         df_with_elo: DataFrame with Elo ratings already calculated
         odds_df: Odds data for ROI calculations
@@ -739,93 +1052,116 @@ def compute_prediction_metrics(df_with_elo, odds_df, lookback_days=0):
     
     Returns:
         dict: Contains 'accuracy', 'log_loss', 'brier_score', 'total_predictions'
+              On error, returns conservative defaults with 'error' key set.
     """
-    # Filter to lookback period if requested
-    if lookback_days and lookback_days > 0:
-        max_date = df_with_elo["DATE"].max()
-        cutoff_date = max_date - pd.Timedelta(days=lookback_days)
-        test_df = df_with_elo[df_with_elo["DATE"] > cutoff_date].copy()
-    else:
-        test_df = df_with_elo.copy()
+    # Default return on error
+    default_return = {
+        'accuracy': 0.5,  # Random baseline
+        'log_loss': 0.693,  # log(2) - random classifier
+        'brier_score': 0.25,  # Random classifier
+        'total_predictions': 0,
+        'error': None
+    }
     
-    # Build fighter history for prior fight check
-    hist = build_fighter_history(df_with_elo)
-    first_dates = hist.groupby("fighter")["date"].min().to_dict()
-    
-    predictions = []
-    actuals = []
-    processed_fights = set()
-    
-    for _, row in test_df.iterrows():
-        result = row["result"]
-        if result not in (0, 1):
-            continue
-        if pd.isna(row["DATE"]):
-            continue
+    try:
+        # Filter to lookback period if requested
+        if lookback_days and lookback_days > 0:
+            max_date = df_with_elo["DATE"].max()
+            cutoff_date = max_date - pd.Timedelta(days=lookback_days)
+            test_df = df_with_elo[df_with_elo["DATE"] > cutoff_date].copy()
+        else:
+            test_df = df_with_elo.copy()
         
-        fighter = row["FIGHTER"]
-        opponent = row["opp_FIGHTER"]
-        date_str = str(row["DATE"].date())
+        # Handle empty DataFrame
+        if len(test_df) == 0:
+            default_return['error'] = 'Empty DataFrame after filtering'
+            return default_return
         
-        # Create unique fight key to avoid double counting
-        fight_key = tuple(sorted([fighter, opponent])) + (date_str,)
-        if fight_key in processed_fights:
-            continue
-        processed_fights.add(fight_key)
+        # Build fighter history for prior fight check
+        hist = build_fighter_history(df_with_elo)
+        first_dates = hist.groupby("fighter")["date"].min().to_dict()
         
-        # Skip if equal Elo ratings
-        if row["precomp_elo"] == row["opp_precomp_elo"]:
-            continue
+        predictions = []
+        actuals = []
+        processed_fights = set()
         
-        # Skip if either fighter has no prior history
-        if not has_prior_history(first_dates, fighter, row["DATE"]):
-            continue
-        if not has_prior_history(first_dates, opponent, row["DATE"]):
-            continue
+        for _, row in test_df.iterrows():
+            result = row["result"]
+            if result not in (0, 1):
+                continue
+            if pd.isna(row["DATE"]):
+                continue
+            
+            fighter = row["FIGHTER"]
+            opponent = row["opp_FIGHTER"]
+            date_str = str(row["DATE"].date())
+            
+            # Create unique fight key to avoid double counting
+            fight_key = tuple(sorted([fighter, opponent])) + (date_str,)
+            if fight_key in processed_fights:
+                continue
+            processed_fights.add(fight_key)
+            
+            # Skip if equal Elo ratings
+            if row["precomp_elo"] == row["opp_precomp_elo"]:
+                continue
+            
+            # Skip if either fighter has no prior history
+            if not has_prior_history(first_dates, fighter, row["DATE"]):
+                continue
+            if not has_prior_history(first_dates, opponent, row["DATE"]):
+                continue
+            
+            # Calculate predicted probability using Elo formula
+            elo_diff = row["precomp_elo"] - row["opp_precomp_elo"]
+            pred_prob = 1.0 / (1.0 + 10.0 ** (-elo_diff / 400.0))
+            
+            # Actual outcome (1 if fighter won, 0 if opponent won)
+            actual = int(result)
+            
+            predictions.append(pred_prob)
+            actuals.append(actual)
         
-        # Calculate predicted probability using Elo formula
-        elo_diff = row["precomp_elo"] - row["opp_precomp_elo"]
-        pred_prob = 1.0 / (1.0 + 10.0 ** (-elo_diff / 400.0))
+        if len(predictions) == 0:
+            return {
+                'accuracy': None,
+                'log_loss': None,
+                'brier_score': None,
+                'total_predictions': 0,
+                'error': None
+            }
         
-        # Actual outcome (1 if fighter won, 0 if opponent won)
-        actual = int(result)
+        predictions = np.array(predictions)
+        actuals = np.array(actuals)
         
-        predictions.append(pred_prob)
-        actuals.append(actual)
-    
-    if len(predictions) == 0:
+        # Accuracy: % of correct predictions (predict winner based on higher prob)
+        pred_winners = (predictions > 0.5).astype(int)
+        accuracy = np.mean(pred_winners == actuals)
+        
+        # Log loss: -mean(y*log(p) + (1-y)*log(1-p))
+        # Clip predictions to avoid log(0)
+        eps = 1e-15
+        predictions_clipped = np.clip(predictions, eps, 1 - eps)
+        log_loss = -np.mean(
+            actuals * np.log(predictions_clipped) + 
+            (1 - actuals) * np.log(1 - predictions_clipped)
+        )
+        
+        # Brier score: mean((p - y)^2)
+        brier_score = np.mean((predictions - actuals) ** 2)
+        
         return {
-            'accuracy': None,
-            'log_loss': None,
-            'brier_score': None,
-            'total_predictions': 0
+            'accuracy': accuracy,
+            'log_loss': log_loss,
+            'brier_score': brier_score,
+            'total_predictions': len(predictions),
+            'error': None
         }
     
-    predictions = np.array(predictions)
-    actuals = np.array(actuals)
-    
-    # Accuracy: % of correct predictions (predict winner based on higher prob)
-    pred_winners = (predictions > 0.5).astype(int)
-    accuracy = np.mean(pred_winners == actuals)
-    
-    # Log loss: -mean(y*log(p) + (1-y)*log(1-p))
-    # Clip predictions to avoid log(0)
-    eps = 1e-15
-    predictions_clipped = np.clip(predictions, eps, 1 - eps)
-    log_loss = -np.mean(
-        actuals * np.log(predictions_clipped) + 
-        (1 - actuals) * np.log(1 - predictions_clipped)
-    )
-    
-    # Brier score: mean((p - y)^2)
-    brier_score = np.mean((predictions - actuals) ** 2)
-    
-    return {
-        'accuracy': accuracy,
-        'log_loss': log_loss,
-        'brier_score': brier_score,
-        'total_predictions': len(predictions)
-    }
+    except Exception as e:
+        print(f"Warning: compute_prediction_metrics failed: {e}")
+        default_return['error'] = str(e)
+        return default_return
 
 
 def compute_extended_roi_metrics(bet_records):
@@ -1403,6 +1739,7 @@ def ga_search_params_roi(
     use_train_val_split=False,
     validation_split=0.5,
     overfitting_threshold=2.0,
+    use_parallel_eval=False,
 ):
     """
     Full GA search over k and method of victory weights using ROI as fitness.
@@ -1445,6 +1782,8 @@ def ga_search_params_roi(
                          Only used when use_train_val_split=True
         overfitting_threshold: Max allowed gap between train and val ROI in percentage points
                               (default 2.0%). Candidates with larger gaps are penalized.
+        use_parallel_eval: If True, evaluate population in parallel using multiprocessing
+                          (default False). Limited by available CPU cores.
     
     Returns:
         If return_all_results=False: best_params, best_fitness
@@ -2323,13 +2662,16 @@ def ga_search_params(
 
 
 def save_comprehensive_results(output_path, best_params, best_fitness, extended_metrics,
-                               all_results=None, config_name="default"):
+                               all_results=None, config_name="default", run_info=None,
+                               oos_metrics=None, train_val_metrics=None):
     """
     Save comprehensive GA results to a JSON file.
     
     This function creates a detailed results file with:
+    - Run info (flags, parameters, timestamps)
     - Best configuration parameters
     - All metrics (ROI, accuracy, calibration, consistency, etc.)
+    - Train/Val/OOS metrics for overfitting analysis
     - Calibration curve data for plotting
     - Consistency breakdown by tier, method, time
     - Per-generation evolution data
@@ -2341,6 +2683,9 @@ def save_comprehensive_results(output_path, best_params, best_fitness, extended_
         extended_metrics: Dict from evaluate_params_roi with return_extended=True
         all_results: Optional list of per-generation results
         config_name: Name identifier for this configuration
+        run_info: Optional dict with run configuration (seed, generations, population, flags)
+        oos_metrics: Optional dict with out-of-sample ROI metrics
+        train_val_metrics: Optional dict with train/validation split metrics
     
     Returns:
         dict: The saved results structure
@@ -2402,11 +2747,23 @@ def save_comprehensive_results(output_path, best_params, best_fitness, extended_
     
     results = {
         'config_name': config_name,
-        'timestamp': pd.Timestamp.now().isoformat(),
+        'timestamp': datetime.now().isoformat(),
+        
+        # Run information
+        'run_info': convert_to_serializable(run_info) if run_info else {
+            'timestamp': datetime.now().isoformat(),
+        },
         
         # Core results
         'best_params': convert_to_serializable(best_params),
         'best_fitness': convert_to_serializable(best_fitness),
+        
+        # Train/Val/OOS metrics for overfitting analysis
+        'best_metrics': {
+            'train': convert_to_serializable(train_val_metrics.get('train')) if train_val_metrics else None,
+            'val': convert_to_serializable(train_val_metrics.get('val')) if train_val_metrics else None,
+            'oos': convert_to_serializable(oos_metrics) if oos_metrics else None,
+        },
         
         # Summary metrics
         'summary': {
@@ -2442,6 +2799,9 @@ def save_comprehensive_results(output_path, best_params, best_fitness, extended_
         
         # Full comprehensive metrics (for detailed analysis)
         'comprehensive_metrics': convert_to_serializable(comprehensive) if comprehensive else None,
+        
+        # Warnings from metric computations
+        'warnings': extended_metrics.get('warnings', []),
     }
     
     # Save to file
@@ -2581,11 +2941,11 @@ if __name__ == "__main__":
                         help="Show comprehensive metrics summary after optimization.")
     
     # Train/Validation Split options for overfitting detection
-    parser.add_argument("--train-val-split", choices=["on", "off"], default="off",
+    parser.add_argument("--train-val-split", type=str, default="off",
                         dest="train_val_split",
-                        help="Enable train/validation split for overfitting detection (default: off). "
-                             "When on, splits the lookback window into train and validation portions, "
-                             "calculates ROI on both, and penalizes candidates with large train/val gaps.")
+                        help="Enable train/validation split for overfitting detection. "
+                             "Options: 'off' (default), 'on' (use --validation-split), or "
+                             "a percentage like '50%%' to directly set validation percentage.")
     parser.add_argument("--validation-split", type=float, default=0.5,
                         dest="validation_split",
                         help="Fraction of lookback window to use for validation (default: 0.5). "
@@ -2597,26 +2957,52 @@ if __name__ == "__main__":
                              "Candidates with larger gaps are penalized as overfitted. "
                              "Only used when --train-val-split is on.")
     
+    # Parallel evaluation option
+    parser.add_argument("--parallel-eval", choices=["on", "off"], default="off",
+                        dest="parallel_eval",
+                        help="Enable parallel evaluation of population using multiprocessing (default: off). "
+                             "Uses multiple CPU cores to speed up fitness evaluation.")
+    
     args = parser.parse_args()
     
     # Convert on/off to boolean
     multiphase_decay = args.multiphase_decay == "on"
     weight_adjust = args.weight_adjust == "on"
     optimize_elo_denom = args.optimize_elo_denom == "on"
-    use_train_val_split = args.train_val_split == "on"
+    use_parallel_eval = args.parallel_eval == "on"
     
-    # Parse fitness weights if provided
+    # Parse train-val-split option (supports 'on', 'off', or '50%')
+    use_train_val_split = False
+    validation_split = args.validation_split
+    if args.train_val_split == "on":
+        use_train_val_split = True
+    elif args.train_val_split != "off":
+        # Try to parse as percentage (e.g., '50%')
+        try:
+            pct_str = args.train_val_split.replace('%', '').strip()
+            pct_val = float(pct_str)
+            if 0 < pct_val < 100:
+                use_train_val_split = True
+                validation_split = pct_val / 100.0
+            else:
+                print(f"Warning: Invalid train-val-split percentage '{args.train_val_split}'. "
+                      f"Must be between 0 and 100. Using default.")
+        except ValueError:
+            print(f"Warning: Could not parse train-val-split '{args.train_val_split}'. "
+                  f"Expected 'on', 'off', or percentage like '50%'. Using 'off'.")
+    
+    # Parse fitness weights if provided (with validation)
     fitness_weights = None
     if args.fitness_mode == "multi":
         if args.fitness_weights:
             try:
-                fitness_weights = json.loads(args.fitness_weights)
-            except json.JSONDecodeError:
-                print(f"Warning: Could not parse --fitness-weights '{args.fitness_weights}'. Using defaults.")
-                fitness_weights = {'roi': 0.4, 'calibration': 0.2, 'consistency': 0.2, 'auc': 0.2}
+                fitness_weights = parse_fitness_weights(args.fitness_weights)
+            except ValueError as e:
+                print(f"Warning: {e}. Using defaults.")
+                fitness_weights = DEFAULT_MULTI_METRIC_WEIGHTS.copy()
         else:
             # Default multi-metric weights
-            fitness_weights = {'roi': 0.4, 'calibration': 0.2, 'consistency': 0.2, 'auc': 0.2}
+            fitness_weights = DEFAULT_MULTI_METRIC_WEIGHTS.copy()
     
     df = pd.read_csv("data/interleaved_cleaned.csv", low_memory=False)
     test_df = pd.read_csv("data/past3_events.csv", low_memory=False)
@@ -2680,8 +3066,12 @@ if __name__ == "__main__":
         # Log train/val split info if enabled
         if use_train_val_split:
             print(f"Train/Validation Split: ENABLED")
-            print(f"  Validation split: {args.validation_split*100:.0f}%")
+            print(f"  Validation split: {validation_split*100:.0f}%")
             print(f"  Overfitting threshold: {args.overfitting_threshold}% gap")
+        
+        # Log parallel eval info
+        if use_parallel_eval:
+            print(f"Parallel Evaluation: ENABLED (using {cpu_count()} cores)")
         
         # Run ROI-based GA search with lookback_days parameter and decay_mode
         best_params, best_roi, all_results = ga_search_params_roi(
@@ -2698,8 +3088,9 @@ if __name__ == "__main__":
             optimize_elo_denom=optimize_elo_denom,
             fitness_weights=fitness_weights,
             use_train_val_split=use_train_val_split,
-            validation_split=args.validation_split,
+            validation_split=validation_split,
             overfitting_threshold=args.overfitting_threshold,
+            use_parallel_eval=use_parallel_eval,
             return_all_results=True,
         )
 
@@ -2869,13 +3260,53 @@ if __name__ == "__main__":
         # Save to JSON if output path provided
         if args.output_json:
             print(f"\nSaving comprehensive results to: {args.output_json}")
+            
+            # Build run_info with all configuration flags
+            run_info = {
+                'timestamp': datetime.now().isoformat(),
+                'seed': args.seed,
+                'population': args.population,
+                'generations': args.generations,
+                'lookback_days': args.lookback_days,
+                'decay_mode': args.decay_mode,
+                'fitness_mode': args.fitness_mode,
+                'fitness_weights': fitness_weights,
+                'train_val_split': use_train_val_split,
+                'validation_split': validation_split if use_train_val_split else None,
+                'overfitting_threshold': args.overfitting_threshold if use_train_val_split else None,
+                'parallel_eval': use_parallel_eval,
+                'multiphase_decay': multiphase_decay,
+                'weight_adjust': weight_adjust,
+                'optimize_elo_denom': optimize_elo_denom,
+            }
+            
+            # Build train/val metrics if enabled
+            train_val_metrics = None
+            if use_train_val_split and all_results:
+                last_gen = all_results[-1]
+                train_val_metrics = {
+                    'train': {
+                        'roi_percent': last_gen.get('best_train_roi'),
+                        'num_bets': last_gen.get('best_train_bets'),
+                    },
+                    'val': {
+                        'roi_percent': last_gen.get('best_val_roi'),
+                        'num_bets': last_gen.get('best_val_bets'),
+                    },
+                    'gap': last_gen.get('best_train_val_gap'),
+                    'is_overfitted': last_gen.get('best_is_overfitted'),
+                }
+            
             save_comprehensive_results(
                 args.output_json,
                 best_params,
                 best_roi,
                 final_extended,
                 all_results,
-                config_name=f"ga_roi_{args.lookback_days}d"
+                config_name=f"ga_roi_{args.lookback_days}d",
+                run_info=run_info,
+                oos_metrics=oos_roi_results,
+                train_val_metrics=train_val_metrics,
             )
             print(f"Results saved successfully!")
     else:
