@@ -94,9 +94,12 @@ def parse_fitness_weights(json_str):
     
     Args:
         json_str: JSON string like '{"roi": 0.4, "calibration": 0.2, ...}'
+                  If None, returns DEFAULT_MULTI_METRIC_WEIGHTS.
     
     Returns:
-        dict: Validated and normalized weights
+        dict: Validated and normalized weights. If json_str is None,
+              returns default weights: {'roi': 0.4, 'accuracy': 0.15,
+              'calibration': 0.15, 'consistency': 0.15, 'auc': 0.15}
     
     Raises:
         ValueError: If JSON is invalid or contains invalid keys/values
@@ -105,6 +108,10 @@ def parse_fitness_weights(json_str):
         >>> weights = parse_fitness_weights('{"roi": 0.4, "calibration": 0.3, "consistency": 0.3}')
         >>> sum(weights.values())  # Always sums to 1.0
         1.0
+        
+        >>> weights = parse_fitness_weights(None)  # Returns defaults
+        >>> 'roi' in weights
+        True
     """
     if json_str is None:
         return DEFAULT_MULTI_METRIC_WEIGHTS.copy()
@@ -1848,6 +1855,8 @@ def ga_search_params_roi(
             active_features.append("weight-adjust")
         if optimize_elo_denom:
             active_features.append("optimize-elo-denom")
+        if use_parallel_eval:
+            active_features.append("parallel-eval")
         if active_features:
             print(f"Active features: {', '.join(active_features)}")
         else:
@@ -2048,8 +2057,9 @@ def ga_search_params_roi(
         elite = population[0].copy()
         new_population.append(elite)
         
-        # Fill the rest
-        while len(new_population) < population_size:
+        # Generate all children first (for parallel evaluation)
+        children_params = []
+        while len(children_params) < population_size - 1:
             parent1 = tournament_select(population)
             parent2 = tournament_select(population)
             child_params = crossover(
@@ -2062,9 +2072,30 @@ def ga_search_params_roi(
                 multiphase_decay=multiphase_decay, weight_adjust=weight_adjust,
                 optimize_elo_denom=optimize_elo_denom, param_bounds=param_bounds
             )
-            
-            fitness, extended = evaluate_individual(child_params)
-            new_population.append({"params": child_params, "fitness": fitness, "extended": extended})
+            children_params.append(child_params)
+        
+        # Evaluate children (parallel or sequential)
+        if use_parallel_eval and len(children_params) > 1:
+            # Parallel evaluation using multiprocessing
+            try:
+                # Limit workers to avoid overwhelming the system
+                num_workers = min(cpu_count(), len(children_params), 4)
+                with Pool(processes=num_workers) as pool:
+                    results = pool.map(evaluate_individual, children_params)
+                for child_params, (fitness, extended) in zip(children_params, results):
+                    new_population.append({"params": child_params, "fitness": fitness, "extended": extended})
+            except Exception as e:
+                # Fallback to sequential on error (e.g., pickling issues)
+                if verbose:
+                    print(f"  Warning: Parallel eval failed ({e}), falling back to sequential")
+                for child_params in children_params:
+                    fitness, extended = evaluate_individual(child_params)
+                    new_population.append({"params": child_params, "fitness": fitness, "extended": extended})
+        else:
+            # Sequential evaluation
+            for child_params in children_params:
+                fitness, extended = evaluate_individual(child_params)
+                new_population.append({"params": child_params, "fitness": fitness, "extended": extended})
         
         population = new_population
         gen_best = max(population, key=lambda ind: ind["fitness"])
@@ -3071,7 +3102,7 @@ if __name__ == "__main__":
         
         # Log parallel eval info
         if use_parallel_eval:
-            print(f"Parallel Evaluation: ENABLED (using {cpu_count()} cores)")
+            print(f"Parallel Evaluation: ENABLED (up to {min(cpu_count(), 4)} workers per generation)")
         
         # Run ROI-based GA search with lookback_days parameter and decay_mode
         best_params, best_roi, all_results = ga_search_params_roi(
