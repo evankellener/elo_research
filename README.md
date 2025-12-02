@@ -17,6 +17,9 @@ This project implements an Elo rating system to predict fight outcomes. It inclu
 - `scripts/elo_utils.py` - Utility functions for Elo calculations and Method of Victory scaling
 - `scripts/full_genetic_with_k_denom_mov.py` - Genetic algorithm for optimizing K-factor and Method of Victory weights
 - `scripts/optimal_k_with_mov.py` - Grid search for K-factor optimization with Method of Victory (MOV) comparison and visualization
+- `scripts/time_splitter.py` - Time-based splitter for creating non-overlapping validation splits
+- `scripts/ga_time_split_roi.py` - GA optimization with time-split ROI consistency objective
+- `scripts/prediction_metrics.py` - Prediction calibration and consistency metrics
 - `data/interleaved_cleaned.csv` - Historical fight data for training
 - `data/past3_events.csv` - Recent events for out-of-sample testing
 
@@ -48,6 +51,11 @@ python scripts/full_genetic_with_k_denom_mov.py
 Run the MOV comparison analysis (compares Elo with and without Method of Victory weights using grid search):
 ```bash
 python scripts/optimal_k_with_mov.py
+```
+
+Run time-split ROI optimization (finds parameters with consistent ROI across time):
+```bash
+python scripts/ga_time_split_roi.py --data-file data/interleaved_cleaned.csv --split-months 6
 ```
 
 ### Updating GitHub Repository
@@ -313,6 +321,126 @@ After 30 generations with a population size of 30:
 3. **Generalization**: The OOS accuracy of 57.14% is above random chance (50%) and close to the validation accuracy (59.60%), indicating good generalization. The smaller OOS sample size (14 fights) reflects the temporal gap between training data (ending 2022-07-27) and test events (2025), where many fighters lack prior history in the training period.
 
 4. **Convergence**: The GA converged by generation 29, finding a stable solution that balances exploration and exploitation of the parameter space.
+
+### Time-Split ROI Optimization
+
+The time-split ROI optimization (`ga_time_split_roi.py`) extends the genetic algorithm to find parameters that produce **consistent ROI across different time periods**. This approach helps prevent overfitting to specific market conditions or time periods.
+
+#### Motivation
+
+Standard GA optimization can find parameters that achieve high ROI on historical data but may overfit to specific time periods. By evaluating candidates across multiple non-overlapping time splits, the algorithm prefers parameters that generalize well across different market conditions.
+
+#### Fitness Function
+
+The optimization uses a composite fitness function:
+
+```
+fitness = mean_roi - λ * std_roi
+```
+
+where:
+- **mean_roi**: Arithmetic mean ROI across all time splits
+- **std_roi**: Standard deviation of ROI across splits (measures consistency)
+- **λ (lambda)**: Penalty hyperparameter (default: 1.0)
+
+This pushes the GA to prefer parameter sets that achieve consistent ROI across time, rather than overfitting to specific periods.
+
+**Alternative Objective**: Coefficient of Variation minimization
+```
+fitness = 100 - CV * 100
+```
+where CV = std_roi / |mean_roi|. Use `--objective cv` to enable.
+
+#### Time-Based Splitting
+
+The splitter creates non-overlapping, contiguous time periods for validation:
+
+1. **Expanding Window** (default): Training uses all data before the validation period
+   - Split 1: Train on months 1-6, validate on months 7-12
+   - Split 2: Train on months 1-12, validate on months 13-18
+   - Training data grows with each split
+
+2. **Rolling Window**: Training uses a fixed-size window immediately before validation
+   - Split 1: Train on months 1-6, validate on months 7-12
+   - Split 2: Train on months 7-12, validate on months 13-18
+   - Training window size stays constant
+
+#### Usage
+
+```bash
+# Run with 6-month validation splits
+python scripts/ga_time_split_roi.py \
+    --data-file data/interleaved_cleaned.csv \
+    --split-months 6 \
+    --generations 30 \
+    --population 30
+
+# Run with multiple split lengths
+python scripts/ga_time_split_roi.py \
+    --data-file data/interleaved_cleaned.csv \
+    --split-months 2,6,12 \
+    --out-dir results/multi_split
+
+# Use CV objective with custom lambda
+python scripts/ga_time_split_roi.py \
+    --data-file data/interleaved_cleaned.csv \
+    --split-months 6 \
+    --objective cv \
+    --lambda 2.0
+
+# Use rolling window instead of expanding
+python scripts/ga_time_split_roi.py \
+    --data-file data/interleaved_cleaned.csv \
+    --split-months 6 \
+    --window-type rolling
+```
+
+#### CLI Arguments
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--data-file` | Path to historical fight data CSV | Required |
+| `--odds-file` | Path to odds data CSV | `after_averaging.csv` |
+| `--time-column` | Name of date/time column | Auto-detect |
+| `--split-months` | Split duration(s), e.g., `6` or `2,6,12` | Required |
+| `--window-type` | `expanding` or `rolling` | `expanding` |
+| `--lambda` | Penalty weight for std_roi | `1.0` |
+| `--objective` | `mean_std` or `cv` | `mean_std` |
+| `--generations` | Number of GA generations | `30` |
+| `--population` | GA population size | `30` |
+| `--random-seed` | Random seed for reproducibility | None |
+| `--out-dir` | Output directory | `results/time_split_roi` |
+| `--metric-output` | Path for consolidated metrics CSV | None |
+| `--quiet` | Suppress verbose output | False |
+
+#### Output Files
+
+For each split duration (e.g., 6 months), the script generates:
+
+1. **`6m_best_params.json`**: Best parameters and summary metrics
+2. **`6m_per_split_roi.csv`**: ROI for each time split
+3. **`6m_evolution.csv`**: Per-generation fitness evolution
+
+Example JSON output:
+```json
+{
+  "config": {
+    "split_months": 6,
+    "lambda_penalty": 1.0,
+    "objective": "mean_std"
+  },
+  "best_params": {
+    "k": 32.5,
+    "w_ko": 1.4,
+    "w_sub": 1.3,
+    ...
+  },
+  "best_fitness": 2.5,
+  "mean_roi": 4.2,
+  "std_roi": 1.7,
+  "cv": 0.4
+}
+```
 
 ## Requirements
 
