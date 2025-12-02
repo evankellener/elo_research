@@ -16,9 +16,10 @@
 
 set -e
 
-# Change to scripts directory (relative to this script's location)
+# Change to repo root directory (parent of scripts/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
 
 # Parse arguments
 SEED=${SEED:-42}
@@ -76,7 +77,7 @@ echo "  Output log: $OUTPUT_LOG"
 echo ""
 
 # Run the GA
-python full_genetic_with_k_denom_mov.py \
+python scripts/full_genetic_with_k_denom_mov.py \
     --mode roi \
     --seed "$SEED" \
     --generations "$GENERATIONS" \

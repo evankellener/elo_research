@@ -54,18 +54,17 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run GA stability test (seed=${{ matrix.seed }})
-        working-directory: scripts
         run: |
-          python full_genetic_with_k_denom_mov.py \
+          python scripts/full_genetic_with_k_denom_mov.py \
             --mode roi \
             --seed ${{ matrix.seed }} \
             --generations ${{ github.event.inputs.generations || '5' }} \
             --population ${{ github.event.inputs.population || '10' }} \
             --lookback-days ${{ github.event.inputs.lookback_days || '365' }} \
             --train-val-split ${{ github.event.inputs.train_val_split || '50%' }} \
-            --output-json ../results_seed_${{ matrix.seed }}.json \
+            --output-json results_seed_${{ matrix.seed }}.json \
             --show-comprehensive \
-            2>&1 | tee ../ga_run_seed_${{ matrix.seed }}.log
+            2>&1 | tee ga_run_seed_${{ matrix.seed }}.log
 
       - name: Upload results artifact
         uses: actions/upload-artifact@v4
