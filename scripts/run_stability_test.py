@@ -129,7 +129,7 @@ def create_summary():
     if len(rois) >= 2:
         median_roi = statistics.median(rois)
         mean_roi = statistics.mean(rois)
-        stdev_roi = statistics.stdev(rois) if len(rois) >= 2 else 0
+        stdev_roi = statistics.stdev(rois)
     else:
         median_roi = rois[0] if rois else None
         mean_roi = rois[0] if rois else None
@@ -138,7 +138,7 @@ def create_summary():
     if len(accuracies) >= 2:
         median_acc = statistics.median(accuracies)
         mean_acc = statistics.mean(accuracies)
-        stdev_acc = statistics.stdev(accuracies) if len(accuracies) >= 2 else 0
+        stdev_acc = statistics.stdev(accuracies)
     else:
         median_acc = accuracies[0] if accuracies else None
         mean_acc = accuracies[0] if accuracies else None
