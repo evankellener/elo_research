@@ -190,9 +190,12 @@ def create_time_splits_with_offset(
         >>> # Create quarterly splits with rolling window
         >>> splits = create_time_splits_with_offset(df, '3M', window_type='rolling')
     """
-    # Convert string to DateOffset if needed
+    # Convert string to DateOffset if needed using relativedelta for consistency
     if isinstance(offset, str):
-        offset = pd.DateOffset(months=_parse_offset_months(offset))
+        months = _parse_offset_months(offset)
+        # Use relativedelta for consistency with the rest of the module
+        # This handles large month values correctly
+        offset = relativedelta(months=months)
     
     # Auto-detect time column
     if time_column is None:

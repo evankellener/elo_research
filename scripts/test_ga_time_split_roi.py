@@ -435,14 +435,16 @@ class TestFitnessCalculations(unittest.TestCase):
         mean_roi = np.mean(roi_values)
         std_roi = np.std(roi_values, ddof=1)
         
-        # When mean is near zero, CV should be inf or very high
+        # When mean is near zero, CV should be a large finite value
+        MAX_CV = 1e6
         if abs(mean_roi) > 0.001:
             cv = std_roi / abs(mean_roi)
         else:
-            cv = float('inf') if std_roi > 0 else 0.0
+            cv = MAX_CV if std_roi > 0 else 0.0
         
-        # CV should handle this gracefully
-        self.assertTrue(cv == float('inf') or cv >= 0)
+        # CV should handle this gracefully (finite, non-negative)
+        self.assertTrue(cv >= 0)
+        self.assertTrue(np.isfinite(cv))
 
 
 if __name__ == '__main__':

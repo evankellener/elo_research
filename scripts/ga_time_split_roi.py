@@ -259,10 +259,12 @@ def compute_time_split_fitness(
     std_roi = float(np.std(roi_array, ddof=1)) if len(roi_array) > 1 else 0.0
     
     # Coefficient of variation (handle zero mean)
+    # Use a large finite value instead of inf to avoid arithmetic issues
+    MAX_CV = 1e6  # Large but finite value
     if abs(mean_roi) > 0.001:
         cv = std_roi / abs(mean_roi)
     else:
-        cv = float('inf') if std_roi > 0 else 0.0
+        cv = MAX_CV if std_roi > 0 else 0.0
     
     # Calculate fitness based on objective
     if objective == "mean_std":
@@ -272,8 +274,9 @@ def compute_time_split_fitness(
     elif objective == "cv":
         # Minimize coefficient of variation (negate for maximization)
         # We want low CV, so fitness = -CV (or use a transform)
-        # Use 100 - cv * 100 to keep in similar scale
-        fitness = 100 - cv * 100 if cv != float('inf') else -1000
+        # Clamp CV to reasonable range for fitness calculation
+        clamped_cv = min(cv, 100.0)  # Cap at 100 for reasonable fitness scale
+        fitness = 100.0 - clamped_cv * 100.0
     else:
         raise ValueError(f"Unknown objective: {objective}. Use 'mean_std' or 'cv'.")
     
