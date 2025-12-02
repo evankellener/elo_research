@@ -1,0 +1,132 @@
+# GitHub Actions workflow for GA stability testing
+# Runs the genetic algorithm with multiple seeds to check result consistency
+
+name: GA Stability Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      generations:
+        description: 'Number of generations to run'
+        required: false
+        default: '5'
+        type: string
+      population:
+        description: 'Population size'
+        required: false
+        default: '10'
+        type: string
+      lookback_days:
+        description: 'Lookback period in days'
+        required: false
+        default: '365'
+        type: string
+      train_val_split:
+        description: 'Enable train/validation split'
+        required: false
+        default: '50%'
+        type: string
+
+# Minimal permissions needed for this workflow
+permissions:
+  contents: read
+
+jobs:
+  stability-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        seed: [1, 2, 3]
+      fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run GA stability test (seed=${{ matrix.seed }})
+        run: |
+          python scripts/full_genetic_with_k_denom_mov.py \
+            --mode roi \
+            --seed ${{ matrix.seed }} \
+            --generations ${{ github.event.inputs.generations || '5' }} \
+            --population ${{ github.event.inputs.population || '10' }} \
+            --lookback-days ${{ github.event.inputs.lookback_days || '365' }} \
+            --train-val-split ${{ github.event.inputs.train_val_split || '50%' }} \
+            --output-json results_seed_${{ matrix.seed }}.json \
+            --show-comprehensive \
+            2>&1 | tee ga_run_seed_${{ matrix.seed }}.log
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ga-results-seed-${{ matrix.seed }}
+          path: |
+            results_seed_${{ matrix.seed }}.json
+            ga_run_seed_${{ matrix.seed }}.log
+          retention-days: 30
+
+  aggregate-results:
+    runs-on: ubuntu-latest
+    needs: stability-test
+    if: always()
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Aggregate and analyze results
+        run: |
+          echo "=== GA Stability Test Summary ===" > stability_summary.txt
+          echo "" >> stability_summary.txt
+          
+          # Process each result file
+          for seed in 1 2 3; do
+            result_file="artifacts/ga-results-seed-${seed}/results_seed_${seed}.json"
+            if [ -f "$result_file" ]; then
+              echo "--- Seed $seed ---" >> stability_summary.txt
+              python -c "
+import json
+with open('$result_file') as f:
+    data = json.load(f)
+    roi = data.get('summary', {}).get('roi_percent', 'N/A')
+    acc = data.get('summary', {}).get('accuracy', 'N/A')
+    k = data.get('best_params', {}).get('k', 'N/A')
+    print(f'  ROI: {roi}%')
+    print(f'  Accuracy: {float(acc)*100 if acc != \"N/A\" else \"N/A\"}%')
+    print(f'  Best K: {k}')
+" >> stability_summary.txt 2>/dev/null || echo "  Could not parse results" >> stability_summary.txt
+            else
+              echo "--- Seed $seed ---" >> stability_summary.txt
+              echo "  No results file found" >> stability_summary.txt
+            fi
+            echo "" >> stability_summary.txt
+          done
+          
+          cat stability_summary.txt
+
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: stability-summary
+          path: stability_summary.txt
+          retention-days: 30

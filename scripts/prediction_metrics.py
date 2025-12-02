@@ -628,6 +628,118 @@ def compute_consistency_by_experience_gap(df_with_elo):
     }
 
 
+def compute_consistency_by_opp_experience(df_with_elo):
+    """
+    Analyze prediction accuracy by opponent experience tier.
+    
+    Uses opp_precomp_boutcount to categorize opponents into tiers:
+    - Unknown (<5 fights): Fighters with limited data
+    - Novice (5-15 fights): Developing fighters  
+    - Veteran (>15 fights): Experienced fighters
+    
+    This helps identify if the model performs better/worse against
+    opponents at different experience levels.
+    
+    Args:
+        df_with_elo: DataFrame with Elo ratings and opp_precomp_boutcount column
+    
+    Returns:
+        dict: Accuracy metrics for each opponent experience tier
+    """
+    df_copy = df_with_elo.copy()
+    
+    # Check for required columns
+    if 'opp_precomp_boutcount' not in df_copy.columns:
+        return {
+            'tiers': {},
+            'accuracy_variance': None,
+            'accuracy_range': None,
+            'high_variance_flag': None
+        }
+    
+    # Build fighter history
+    hist = build_fighter_history(df_copy)
+    first_dates = hist.groupby("fighter")["date"].min().to_dict()
+    
+    # Define experience tiers per requirements
+    tier_definitions = {
+        'unknown (<5)': (0, 4),      # 0-4 fights = unknown
+        'novice (5-15)': (5, 15),    # 5-15 fights = novice
+        'veteran (>15)': (16, float('inf'))  # 16+ fights = veteran
+    }
+    
+    results = {}
+    
+    for tier_name, (min_bouts, max_bouts) in tier_definitions.items():
+        predictions = []
+        actuals = []
+        
+        for _, row in df_copy.iterrows():
+            result = row.get("result")
+            if result not in (0, 1):
+                continue
+            if pd.isna(row.get("DATE")):
+                continue
+            if row.get("precomp_elo") == row.get("opp_precomp_elo"):
+                continue
+            
+            fighter = row.get("FIGHTER")
+            opponent = row.get("opp_FIGHTER")
+            
+            if not has_prior_history(first_dates, fighter, row["DATE"]):
+                continue
+            if not has_prior_history(first_dates, opponent, row["DATE"]):
+                continue
+            
+            # Get opponent experience
+            opp_bouts = row.get("opp_precomp_boutcount", 0)
+            try:
+                opp_bouts = int(float(opp_bouts)) if opp_bouts and not pd.isna(opp_bouts) else 0
+            except (ValueError, TypeError):
+                opp_bouts = 0
+            
+            # Check if opponent is in this tier
+            if min_bouts <= opp_bouts <= max_bouts:
+                elo_diff = row["precomp_elo"] - row["opp_precomp_elo"]
+                pred_prob = 1.0 / (1.0 + 10.0 ** (-elo_diff / 400.0))
+                
+                predictions.append(pred_prob)
+                actuals.append(int(result))
+        
+        n_fights = len(predictions)
+        if n_fights > 0:
+            predictions = np.array(predictions)
+            actuals = np.array(actuals)
+            pred_winners = (predictions > 0.5).astype(int)
+            accuracy = np.mean(pred_winners == actuals)
+            brier = np.mean((predictions - actuals) ** 2)
+        else:
+            accuracy = None
+            brier = None
+        
+        results[tier_name] = {
+            'count': n_fights,
+            'accuracy': accuracy,
+            'brier_score': brier
+        }
+    
+    # Calculate variance across tiers
+    accuracies = [r['accuracy'] for r in results.values() if r['accuracy'] is not None]
+    if len(accuracies) > 1:
+        accuracy_variance = np.var(accuracies)
+        accuracy_range = max(accuracies) - min(accuracies)
+    else:
+        accuracy_variance = None
+        accuracy_range = None
+    
+    return {
+        'tiers': results,
+        'accuracy_variance': accuracy_variance,
+        'accuracy_range': accuracy_range,
+        'high_variance_flag': accuracy_range > 0.05 if accuracy_range else None
+    }
+
+
 def compute_all_consistency_metrics(df_with_elo):
     """
     Compute all consistency metrics at once.
@@ -674,6 +786,7 @@ def compute_all_consistency_metrics(df_with_elo):
     by_method = compute_consistency_by_method(df_with_elo)
     by_time = compute_consistency_by_time_period(df_with_elo, period='M')
     by_experience = compute_consistency_by_experience_gap(df_with_elo)
+    by_opp_experience = compute_consistency_by_opp_experience(df_with_elo)
     
     # Calculate overall consistency score (lower is better)
     variances = []
@@ -685,6 +798,8 @@ def compute_all_consistency_metrics(df_with_elo):
         variances.append(by_time['accuracy_variance'])
     if by_experience['accuracy_variance'] is not None:
         variances.append(by_experience['accuracy_variance'])
+    if by_opp_experience['accuracy_variance'] is not None:
+        variances.append(by_opp_experience['accuracy_variance'])
     
     overall_variance = np.mean(variances) if variances else None
     
@@ -695,7 +810,9 @@ def compute_all_consistency_metrics(df_with_elo):
     if by_method.get('high_variance_flag'):
         flags.append('method')
     if by_experience.get('high_variance_flag'):
-        flags.append('experience')
+        flags.append('experience_gap')
+    if by_opp_experience.get('high_variance_flag'):
+        flags.append('opp_experience')
     if by_time.get('is_degrading'):
         flags.append('time_degrading')
     
@@ -704,6 +821,7 @@ def compute_all_consistency_metrics(df_with_elo):
         'by_method': by_method,
         'by_time_period': by_time,
         'by_experience_gap': by_experience,
+        'by_opp_experience': by_opp_experience,
         'overall_variance': overall_variance,
         'high_variance_flags': flags
     }
