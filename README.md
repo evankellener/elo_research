@@ -7,18 +7,50 @@ An Elo rating system for fighter predictions, using genetic algorithm optimizati
 This project implements an Elo rating system to predict fight outcomes. It includes:
 
 - Basic Elo rating calculation with configurable K-factor
-- Genetic algorithm to optimize the K-factor based on prediction accuracy
+- Genetic algorithm to optimize the K-factor based on prediction accuracy or ROI
+- Method of Victory (MOV) weighting for more informative rating updates
 - Out-of-sample testing on future events
 - Visualization of accuracy trends over time
+- Ensemble machine learning models for advanced predictions
+- Comprehensive prediction calibration and consistency metrics
+- Diagnostic analysis tools to identify prediction weak spots
+- ROI-based optimization and betting quality metrics
 
 ## Files
 
-- `scripts/main.py` - Main Elo implementation with visualization functions
+### Core Scripts
+
+- `scripts/main.py` - Main Elo implementation with visualization functions and ROI calculation
 - `scripts/elo_utils.py` - Utility functions for Elo calculations and Method of Victory scaling
 - `scripts/full_genetic_with_k_denom_mov.py` - Genetic algorithm for optimizing K-factor and Method of Victory weights
+
+### Advanced Analysis Scripts
+
+- `scripts/predict_fights.py` - Advanced fight prediction system combining Elo ratings with statistical features using ensemble machine learning models (Logistic Regression, Random Forest, Gradient Boosting)
+- `scripts/prediction_metrics.py` - Comprehensive prediction calibration and consistency metrics including ECE (Expected Calibration Error), Brier Score, Log Loss, AUC-ROC, and betting quality metrics (Kelly Criterion, Sharpe Ratio, max drawdown)
 - `scripts/optimal_k_with_mov.py` - Grid search for K-factor optimization with Method of Victory (MOV) comparison and visualization
+- `scripts/analyze_baseline_diagnostics.py` - Diagnostic analysis for baseline Elo predictions across multiple dimensions (experience level, layoff duration, fight method, opponent quality, Elo margin, time trends, calibration)
+- `scripts/diagnostic_tests.py` - Diagnostic test suite for ROI performance degradation analysis (rolling OOS backtest, parameter robustness, bootstrap analysis, market shift detection, Monte Carlo simulation)
+- `scripts/run_all_config_tests.py` - Automated testing script to run the genetic algorithm with all 8 combinations of feature flags (multiphase-decay, weight-adjust, optimize-elo-denom) and generate comparison reports
+
+### Test Files
+
+- `scripts/test_ga_roi.py` - Unit tests for ROI-based genetic algorithm functions
+- `scripts/test_prediction_metrics.py` - Unit tests for prediction calibration and consistency metrics
+- `scripts/test_roi_calculator.py` - Unit tests for ROI calculator functions
+
+### Data Files
+
 - `data/interleaved_cleaned.csv` - Historical fight data for training
 - `data/past3_events.csv` - Recent events for out-of-sample testing
+- `data/most_recent_elo.csv` - Latest Elo ratings for all fighters
+
+### Generated Images
+
+- `images/mov_comparison_plot.png` - MOV vs No MOV accuracy comparison across K values
+- `images/baseline_diagnostics.png` - Diagnostic analysis results visualization
+- `images/k_optimization_accuracy_plot.png` - K-factor optimization accuracy plot
+- `images/roi_over_time.png` - ROI performance over time
 
 ## Setup
 
@@ -48,6 +80,48 @@ python scripts/full_genetic_with_k_denom_mov.py
 Run the MOV comparison analysis (compares Elo with and without Method of Victory weights using grid search):
 ```bash
 python scripts/optimal_k_with_mov.py
+```
+
+### Advanced Analysis
+
+Run the advanced fight prediction system using ensemble models:
+```bash
+python scripts/predict_fights.py
+```
+
+Run diagnostic analysis on baseline Elo predictions to identify weak spots:
+```bash
+python scripts/analyze_baseline_diagnostics.py
+python scripts/analyze_baseline_diagnostics.py --output-json results/diagnostics.json
+python scripts/analyze_baseline_diagnostics.py --no-visualizations
+```
+
+Run diagnostic tests for ROI performance degradation analysis:
+```bash
+python scripts/diagnostic_tests.py           # Run all tests
+python scripts/diagnostic_tests.py --test 1  # Run specific test (1-6)
+python scripts/diagnostic_tests.py --all     # Run all tests with verbose output
+```
+
+Run all configuration tests (tests all 8 feature flag combinations):
+```bash
+python scripts/run_all_config_tests.py
+python scripts/run_all_config_tests.py --seed 42
+python scripts/run_all_config_tests.py --generations 5 --population 10
+```
+
+### Running Tests
+
+Run all unit tests:
+```bash
+python -m pytest scripts/test_*.py -v
+```
+
+Or run individual test files:
+```bash
+python scripts/test_ga_roi.py
+python scripts/test_prediction_metrics.py
+python scripts/test_roi_calculator.py
 ```
 
 ### Updating GitHub Repository
@@ -314,9 +388,94 @@ After 30 generations with a population size of 30:
 
 4. **Convergence**: The GA converged by generation 29, finding a stable solution that balances exploration and exploitation of the parameter space.
 
+## Advanced Features
+
+### Ensemble Fight Prediction (predict_fights.py)
+
+The advanced fight prediction system combines Elo ratings with statistical features using multiple machine learning models for improved accuracy.
+
+**Features Extracted:**
+- **Elo Features**: Elo difference, average Elo, Elo ratio between fighters
+- **Physical Attributes**: Height difference, reach difference, age difference
+- **Experience Features**: Bout count difference, historical win rate difference
+- **Striking Features**: Significant strikes per minute, striking accuracy, striking defense
+- **Grappling Features**: Takedown average, takedown accuracy, takedown defense
+- **Recent Form**: Win rate and striking performance over last 3 fights
+
+**Ensemble Models:**
+- Logistic Regression (with feature scaling)
+- Random Forest Classifier (100 estimators, max depth 10)
+- Gradient Boosting Classifier (100 estimators, max depth 5)
+
+The ensemble uses voting (average probabilities) to make final predictions.
+
+### Prediction Calibration & Consistency Metrics (prediction_metrics.py)
+
+Comprehensive metrics for evaluating prediction quality beyond simple accuracy:
+
+**Calibration Metrics:**
+- **ECE (Expected Calibration Error)**: Measures how well predicted probabilities match actual win rates
+- **Brier Score**: Mean squared error between predictions and outcomes (0 = perfect, 1 = worst)
+- **Log Loss**: Cross-entropy loss measuring prediction confidence
+- **Calibration Slope**: Linear regression of actual vs predicted (slope = 1.0 is perfect)
+
+**Consistency Metrics:**
+- **By Elo Tier**: Accuracy variance across different Elo difference buckets
+- **By Fight Method**: Performance across KO/TKO, Submission, Decision outcomes
+- **By Time Period**: Monthly accuracy trends to detect drift
+- **By Experience Gap**: Performance when fighters have different experience levels
+
+**Betting Quality Metrics:**
+- **Kelly Criterion**: Optimal bet sizing based on edge
+- **Max Drawdown**: Largest peak-to-trough decline in cumulative profits
+- **Sharpe Ratio**: Risk-adjusted return by time period
+- **Value Bet Analysis**: Identifies bets where model probability exceeds implied odds
+
+### Diagnostic Analysis (analyze_baseline_diagnostics.py)
+
+Comprehensive diagnostic analysis to identify which prediction subgroups have poor accuracy/ROI:
+
+**Analysis Dimensions:**
+1. **By Fighter Experience**: Unknown, Novice, Experienced, Veteran
+2. **By Layoff Duration**: Recent (0-90 days), Medium (91-180 days), Long (181-274 days), Very Long (275+ days)
+3. **By Fight Method**: KO/TKO, Submission, Decision types
+4. **By Opponent Quality**: Lower-tier (<1500 Elo), Mid-tier (1500-1700), Elite (>1700)
+5. **By Elo Margin**: Huge favorite, Large favorite, Close, Underdog categories
+6. **Over Time**: Monthly trends to detect model drift
+7. **Confidence Calibration**: ECE by prediction confidence decile
+
+**Output:**
+- Weak spots and strong spots identification
+- Optimization targets ranked by potential ROI impact
+- Visualization saved to `images/baseline_diagnostics.png`
+
+### Diagnostic Test Suite (diagnostic_tests.py)
+
+Six diagnostic tests to analyze ROI performance degradation between training and OOS:
+
+1. **Rolling OOS Backtest**: Train on past windows, test on next window to measure typical ROI drop
+2. **Parameter Robustness**: Compare best GA params vs random params on OOS data (overfitting detection)
+3. **Reshuffle OOS Test**: Bootstrap ROI from random historical samples
+4. **Market Shift Analysis**: Compare odds/rating distributions between training and OOS periods
+5. **Bootstrap/Monte Carlo**: Build ROI variance distribution to understand expected variance
+6. **Accuracy vs ROI Analysis**: Compare prediction accuracy and ROI to identify if accuracy or odds drive performance
+
+### Configuration Testing (run_all_config_tests.py)
+
+Automated testing across all 8 combinations of feature flags:
+- **multiphase-decay**: Enhanced rating decay for activity gaps
+- **weight-adjust**: Weight class adjustment feature
+- **optimize-elo-denom**: Elo denominator optimization (adjusts the 400 in expected score formula)
+
+**Output:**
+- Comparison report with ROI, accuracy, and best parameters for each configuration
+- JSON files with full parameter precision for reproducibility
+- Copy-paste ready Python dictionaries for use in main.py
+
 ## Requirements
 
 - Python 3.7+
 - pandas
 - matplotlib
 - numpy
+- scikit-learn (for predict_fights.py and prediction_metrics.py)
