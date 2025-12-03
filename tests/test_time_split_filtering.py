@@ -21,7 +21,15 @@ from time_splitter import (  # noqa: E402
 
 
 def create_synthetic_data(start_date='2020-01-01', periods=36, freq='ME'):
-    """Create a synthetic dataset for testing."""
+    """
+    Create a synthetic dataset for testing.
+
+    Args:
+        start_date: Start date for the date range
+        periods: Number of periods (rows) to generate
+        freq: Pandas frequency string. 'ME' means 'Month End' frequency,
+              generating dates at the end of each month.
+    """
     dates = pd.date_range(start_date, periods=periods, freq=freq)
     df = pd.DataFrame({
         'DATE': dates,
@@ -106,7 +114,7 @@ class TestFilterAndSampleSplits(unittest.TestCase):
 
             # Verify we got first and last
             # The even strategy should include the first split
-            self.assertEqual(selected_dfs[0].equals(original_dfs[0]), True)
+            self.assertTrue(selected_dfs[0].equals(original_dfs[0]))
 
     def test_random_strategy_is_reproducible(self):
         """Test that 'random' strategy with same seed is reproducible."""

@@ -6,9 +6,11 @@ from historical match data. It supports both expanding and rolling window strate
 for training/validation splits.
 """
 
+import random as py_random
+from typing import List, Optional, Tuple, Union
+
 import numpy as np
 import pandas as pd
-from typing import List, Tuple, Optional, Union
 from dateutil.relativedelta import relativedelta
 
 
@@ -205,8 +207,6 @@ def filter_and_sample_splits(
         - The "even" strategy preserves temporal coverage across the data.
         - The "random" strategy is reproducible with the same seed.
     """
-    import random as py_random
-
     if sample_strategy not in ("even", "random"):
         raise ValueError(f"sample_strategy must be 'even' or 'random', got '{sample_strategy}'")
 
@@ -233,16 +233,9 @@ def filter_and_sample_splits(
     if sample_strategy == "even":
         # Evenly spaced indices across the filtered splits
         n = len(filtered_splits)
-        # Use linspace to get evenly distributed indices
-        indices = [int(round(i)) for i in np.linspace(0, n - 1, max_splits)]
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_indices = []
-        for idx in indices:
-            if idx not in seen:
-                seen.add(idx)
-                unique_indices.append(idx)
-        sampled_splits = [filtered_splits[i] for i in unique_indices]
+        # Use linspace with dtype=int to get unique evenly distributed indices
+        indices = np.unique(np.linspace(0, n - 1, max_splits, dtype=int))
+        sampled_splits = [filtered_splits[i] for i in indices]
     else:  # random
         rng = py_random.Random(sample_seed)
         indices = list(range(len(filtered_splits)))
