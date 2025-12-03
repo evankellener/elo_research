@@ -442,6 +442,82 @@ Example JSON output:
 }
 ```
 
+### Split Filtering Options
+
+The time-split ROI script (`ga_time_split_roi.py`) includes options to filter and downsample validation splits for improved reliability and computational efficiency.
+
+#### New CLI Flags
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--min-val-size` | Minimum number of rows required in validation set to keep a split | `5` |
+| `--max-splits` | Maximum number of splits to use after filtering (None = use all) | `None` |
+| `--sample-strategy` | Strategy for selecting splits: `even` (evenly spaced) or `random` | `even` |
+| `--sample-seed` | Random seed for split sampling when strategy is `random` | `42` |
+
+#### Rationale
+
+- **`--min-val-size`**: Removes splits with too few validation samples, ensuring statistical reliability. A validation set with fewer than 5 samples may not provide meaningful ROI estimates.
+
+- **`--max-splits`**: Limits the number of splits used in fitness evaluation. With many time splits, GA evaluation can be slow. Using 10-20 well-distributed splits often provides similar robustness to using all splits.
+
+- **`--sample-strategy`**: The `even` strategy preserves temporal coverage by selecting evenly-spaced splits. The `random` strategy (with `--sample-seed` for reproducibility) provides an alternative sampling approach.
+
+#### Example Usage
+
+```bash
+# Use filtering with minimum 10 validation samples and max 10 splits
+python scripts/ga_time_split_roi.py \
+    --data-file data/interleaved_cleaned.csv \
+    --split-months 6 \
+    --min-val-size 10 \
+    --max-splits 10 \
+    --sample-strategy even
+
+# Use random sampling with a specific seed
+python scripts/ga_time_split_roi.py \
+    --data-file data/interleaved_cleaned.csv \
+    --split-months 6 \
+    --max-splits 15 \
+    --sample-strategy random \
+    --sample-seed 123
+```
+
+## Development
+
+### Running Tests
+
+```bash
+# Install dev dependencies
+pip install -r requirements-dev.txt
+
+# Run all tests
+python -m pytest tests/ scripts/test_*.py -v
+
+# Run specific test file
+python -m pytest tests/test_time_split_filtering.py -v
+```
+
+### Code Formatting
+
+The project uses `black` for code formatting and `isort` for import sorting:
+
+```bash
+# Check formatting
+black --check scripts/ tests/
+isort --check-only scripts/ tests/
+
+# Apply formatting
+black scripts/ tests/
+isort scripts/ tests/
+```
+
+### Linting
+
+```bash
+flake8 scripts/ tests/
+```
+
 ## Requirements
 
 - Python 3.7+
