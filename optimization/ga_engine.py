@@ -382,7 +382,7 @@ def create_elo_fitness_function(
     base_elo: float = 1500,
     use_validation_split: bool = True,
     validation_percentile: float = 0.8,
-    optimize_for: str = "composite",
+    optimize_for: str = "accuracy",
     fitness_weights: Optional[Dict[str, float]] = None
 ) -> Callable[[Dict[str, float]], float]:
     """
@@ -397,7 +397,10 @@ def create_elo_fitness_function(
         base_elo: Base Elo rating for new fighters
         use_validation_split: Whether to use time-based validation split
         validation_percentile: Percentile for validation split
-        optimize_for: "accuracy", "roi", or "composite" (default)
+        optimize_for: "accuracy" (default), "roi", or "composite"
+            - "accuracy": Simple prediction accuracy only
+            - "roi": Return on investment only  
+            - "composite": Weighted combination of all metrics
         fitness_weights: Optional dict for composite fitness. Keys: 
             'accuracy', 'log_loss', 'brier_score', 'roi'
             Default: {'accuracy': 0.3, 'log_loss': 0.2, 'brier_score': 0.2, 'roi': 0.3}
@@ -450,13 +453,7 @@ def create_elo_fitness_function(
         else:
             val_df = trial.copy()
         
-        # Compute predictions with prior history filtering
-        preds_df = compute_fight_predictions(val_df)
-        
-        if len(preds_df) == 0:
-            return 0.0
-        
-        # Extract predictions and actuals
+        # Extract predictions and actuals with filtering
         predictions = []
         actuals = []
         for _, row in val_df.iterrows():
@@ -514,12 +511,13 @@ def create_elo_fitness_function(
             pred_labels = (predictions > 0.5).astype(int)
             accuracy = np.mean(pred_labels == actuals)
             
-            # Log Loss component (lower is better, so negate and scale)
+            # Log Loss component (lower is better, so invert and scale)
             eps = 1e-15
             predictions_clipped = np.clip(predictions, eps, 1 - eps)
-            log_loss = -np.mean(
-                actuals * np.log(predictions_clipped) +
-                (1 - actuals) * np.log(1 - predictions_clipped)
+            # Standard log loss (no extra negative sign)
+            log_loss = np.mean(
+                -(actuals * np.log(predictions_clipped) +
+                  (1 - actuals) * np.log(1 - predictions_clipped))
             )
             # Scale log loss: perfect = 0, random = 0.693, invert to make higher better
             log_loss_score = max(0, 1.0 - log_loss / 0.693)
@@ -532,9 +530,14 @@ def create_elo_fitness_function(
             # ROI component
             total_profit = 0
             total_bets = 0
-            for i, (pred, actual) in enumerate(zip(predictions, actuals)):
-                # Calculate confidence based on distance from 0.5
-                elo_diff_val = abs(pred - 0.5) * 1000  # Scale to Elo points
+            # Calculate Elo differences for confidence filtering
+            elo_diffs = []
+            for i in range(len(predictions)):
+                # We need to recalculate elo_diff from the row data
+                # For now, use prediction confidence as proxy
+                elo_diffs.append(abs(predictions[i] - 0.5) * 1000)  # Scale to Elo points
+            
+            for i, (pred, actual, elo_diff_val) in enumerate(zip(predictions, actuals, elo_diffs)):
                 if elo_diff_val >= confidence_threshold:
                     pred_winner = 1 if pred > 0.5 else 0
                     if pred_winner == actual:

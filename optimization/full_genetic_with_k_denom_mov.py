@@ -82,7 +82,9 @@ def optimize_elo_parameters_with_ga(
         param_bounds = {
             'k': (10, 500),
             'denominator': (200, 600),
-            'confidence_threshold': (30, 150),  # For ROI calculation
+            # Confidence threshold: minimum Elo difference (in scaled prob units) to place bet
+            # Range 30-150 maps to ~0.03-0.15 probability difference from 0.5
+            'confidence_threshold': (30, 150),
             'w_ko': (1.0, 2.0),
             'w_sub': (1.0, 2.0),
             'w_udec': (0.8, 1.5),

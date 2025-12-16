@@ -13,6 +13,9 @@ import pandas as pd
 from optimization.ga_engine import GeneticAlgorithm, create_elo_fitness_function
 from optimization.optimal_k_with_mov import add_bout_counts
 
+# Configuration
+DATA_SIZE_FOR_EXAMPLES = 3000  # Use last N fights for faster demonstration
+
 
 def example_balanced_optimization():
     """Example 1: Balanced optimization across all metrics."""
@@ -26,7 +29,7 @@ def example_balanced_optimization():
     df["result"] = pd.to_numeric(df["result"], errors="coerce")
     df["DATE"] = pd.to_datetime(df["DATE"])
     df = df.sort_values("DATE").reset_index(drop=True)
-    df = df.tail(3000).copy()
+    df = df.tail(DATA_SIZE_FOR_EXAMPLES).copy()
     df = add_bout_counts(df)
     
     if "precomp_boutcount" in df.columns:
@@ -96,7 +99,7 @@ def example_accuracy_focused():
     df["result"] = pd.to_numeric(df["result"], errors="coerce")
     df["DATE"] = pd.to_datetime(df["DATE"])
     df = df.sort_values("DATE").reset_index(drop=True)
-    df = df.tail(3000).copy()
+    df = df.tail(DATA_SIZE_FOR_EXAMPLES).copy()
     df = add_bout_counts(df)
     
     if "precomp_boutcount" in df.columns:
@@ -163,7 +166,7 @@ def example_profit_focused():
     df["result"] = pd.to_numeric(df["result"], errors="coerce")
     df["DATE"] = pd.to_datetime(df["DATE"])
     df = df.sort_values("DATE").reset_index(drop=True)
-    df = df.tail(3000).copy()
+    df = df.tail(DATA_SIZE_FOR_EXAMPLES).copy()
     df = add_bout_counts(df)
     
     if "precomp_boutcount" in df.columns:
