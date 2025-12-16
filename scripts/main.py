@@ -1518,7 +1518,7 @@ if __name__ == "__main__":
                                 w_sub=2.0,
                                 w_udec=0.8150291233970635,
                                 w_sdec= 0.6277860597403592,
-                                w_mdec=1.0229206801627735)
+                                w_mdec=1.0952059748218574)
     print(display_top_n_elos(df, n = 100))
     print(most_recent_elo(df, n = 100))
     print(elo_accuracy(df))

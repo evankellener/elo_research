@@ -11,8 +11,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, classification_report
 import sys
 sys.path.insert(0, 'scripts')
-from full_genetic_with_k_denom_mov import run_basic_elo, latest_ratings_from_trained_df, find_fighter_match, normalize_name
-from elo_utils import add_bout_counts
+from main import run_basic_elo_with_mov
+from elo_utils import add_bout_counts, latest_ratings_from_trained_df, find_fighter_match
 
 
 def extract_features(df, elo_df=None, is_test_data=False):
@@ -148,19 +148,18 @@ def prepare_training_data(df, test_start_date, best_params=None):
     
     # Calculate Elo ratings
     if best_params:
-        mov_params = {
-            "w_ko": best_params.get("w_ko", 1.4),
-            "w_sub": best_params.get("w_sub", 1.3),
-            "w_udec": best_params.get("w_udec", 1.0),
-            "w_sdec": best_params.get("w_sdec", 0.7),
-            "w_mdec": best_params.get("w_mdec", 0.9),
-        }
         k = best_params.get("k", 32)
+        w_ko = best_params.get("w_ko", 1.4)
+        w_sub = best_params.get("w_sub", 1.3)
+        w_udec = best_params.get("w_udec", 1.0)
+        w_sdec = best_params.get("w_sdec", 0.7)
+        w_mdec = best_params.get("w_mdec", 0.9)
     else:
-        mov_params = None
         k = 32
+        w_ko = w_sub = w_udec = w_sdec = w_mdec = None
     
-    df_train_elo = run_basic_elo(df_train, k=k, mov_params=mov_params)
+    df_train_elo = run_basic_elo_with_mov(df_train, k=k, w_ko=w_ko, w_sub=w_sub, 
+                                          w_udec=w_udec, w_sdec=w_sdec, w_mdec=w_mdec)
     
     # Extract features
     features_df = extract_features(df_train, elo_df=df_train_elo)

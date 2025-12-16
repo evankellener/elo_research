@@ -1,5 +1,5 @@
 """
-Comprehensive prediction calibration and consistency metrics for the GA optimization script.
+Comprehensive prediction calibration and consistency metrics for Elo rating system evaluation.
 
 This module provides:
 1. Calibration Metrics: ECE, Brier Score, Log Loss, Calibration Slope

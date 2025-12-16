@@ -4,6 +4,7 @@ Contains common functions used across multiple scripts.
 """
 import math
 import pandas as pd
+import unicodedata
 
 
 def is_true(val):
@@ -478,4 +479,98 @@ def calculate_expected_value(rating1, rating2, elo_denom=400):
         float: Expected score for player 1 (between 0 and 1)
     """
     return 1.0 / (1.0 + 10.0 ** ((rating2 - rating1) / elo_denom))
+
+
+def normalize_name(name):
+    """
+    Normalize fighter name for matching (handles special characters, middle names, etc.)
+    Converts special characters like 'ę' to 'e' by normalizing unicode and removing combining marks.
+    
+    Args:
+        name: Fighter name to normalize
+    
+    Returns:
+        str: Normalized name (lowercase, no special characters)
+    """
+    if pd.isna(name):
+        return ""
+    # Normalize unicode (decomposes characters like 'ę' into 'e' + combining mark)
+    name = unicodedata.normalize('NFKD', str(name))
+    # Filter out combining characters (like the combining mark after decomposed 'ę')
+    name = ''.join(c for c in name if not unicodedata.combining(c))
+    # Convert to lowercase and remove extra spaces
+    name = ' '.join(name.lower().split())
+    return name
+
+
+def find_fighter_match(test_name, training_names):
+    """
+    Find the best matching fighter name from training data.
+    Handles cases like:
+    - "Jose Miguel Delgado" vs "Jose Delgado"
+    - "Mateusz Rębecki" vs "Mateusz Rebecki"
+    
+    Args:
+        test_name: Fighter name from test data
+        training_names: Set or list of fighter names from training data
+    
+    Returns:
+        str or None: Matching fighter name from training data, or None if no match found
+    """
+    test_normalized = normalize_name(test_name)
+    
+    # First try exact match
+    for train_name in training_names:
+        if normalize_name(train_name) == test_normalized:
+            return train_name
+    
+    # Try matching by last name and first name (handles middle name variations)
+    test_parts = test_normalized.split()
+    if len(test_parts) >= 2:
+        test_first = test_parts[0]
+        test_last = test_parts[-1]
+        for train_name in training_names:
+            train_normalized = normalize_name(train_name)
+            train_parts = train_normalized.split()
+            if len(train_parts) >= 2:
+                train_first = train_parts[0]
+                train_last = train_parts[-1]
+                # Match if first and last names match (ignoring middle names)
+                if test_first == train_first and test_last == train_last:
+                    return train_name
+    
+    return None
+
+
+def latest_ratings_from_trained_df(df, base_elo=1500, as_of_date=None):
+    """
+    Build {fighter_name: latest_post_fight_elo} from df with Elo columns.
+    Uses both FIGHTER and opp_FIGHTER sides.
+    
+    If as_of_date is provided, only uses fights before that date to get ratings.
+    Returns the postcomp_elo from each fighter's LAST fight before as_of_date.
+    
+    Args:
+        df: DataFrame with Elo columns (postcomp_elo, opp_postcomp_elo, DATE, FIGHTER, opp_FIGHTER)
+        base_elo: Default Elo rating for fighters not found (default 1500)
+        as_of_date: Only use fights before this date (optional)
+    
+    Returns:
+        dict: Mapping of fighter name to their latest Elo rating
+    """
+    if as_of_date is not None:
+        df = df[df["DATE"] < as_of_date].copy()
+    
+    # Sort by date to ensure we get the latest rating for each fighter
+    if "DATE" in df.columns:
+        df = df.sort_values("DATE").reset_index(drop=True)
+    
+    ratings = {}
+    for _, r in df.iterrows():
+        # Use postcomp_elo (rating AFTER the fight)
+        # Later fights will overwrite earlier ones, giving us the latest rating
+        ratings[r["FIGHTER"]] = r["postcomp_elo"]
+        ratings[r["opp_FIGHTER"]] = r["opp_postcomp_elo"]
+    
+    return ratings
 
