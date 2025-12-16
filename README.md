@@ -178,14 +178,29 @@ This allows the GA to:
 **Usage Examples:**
 
 ```bash
-# Optimize K, denominator, and MOV weights for accuracy
+# Optimize with composite fitness (default: accuracy, log loss, Brier, ROI)
 python optimization/full_genetic_with_k_denom_mov.py
 
 # Optimize for betting ROI with time-series validation
 python optimization/ga_time_split_roi.py --data-file data/interleaved_cleaned.csv --split-months 6
 
-# Customize GA parameters
-python optimization/full_genetic_with_k_denom_mov.py  # Edit param_bounds in __main__
+# Try different fitness weight combinations
+python examples/example_composite_fitness.py
+```
+
+**Customizing Fitness Weights:**
+
+You can adjust the relative importance of each metric by changing `fitness_weights`:
+
+```python
+# Balanced (default)
+fitness_weights = {'accuracy': 0.3, 'log_loss': 0.2, 'brier_score': 0.2, 'roi': 0.3}
+
+# Accuracy-focused (emphasize prediction quality)
+fitness_weights = {'accuracy': 0.4, 'log_loss': 0.3, 'brier_score': 0.3, 'roi': 0.0}
+
+# Profit-focused (emphasize betting returns)
+fitness_weights = {'accuracy': 0.15, 'log_loss': 0.2, 'brier_score': 0.15, 'roi': 0.5}
 ```
 
 **GA Configuration:**
