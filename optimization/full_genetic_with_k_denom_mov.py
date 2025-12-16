@@ -187,7 +187,7 @@ def plot_parameter_evolution(ga, save_path=None):
     # Create subplots
     n_rows = (n_params + 2) // 3  # 3 columns
     fig, axes = plt.subplots(n_rows, 3, figsize=(16, 4 * n_rows))
-    axes = axes.flatten() if n_params > 1 else [axes]
+    axes = axes.flatten() if n_rows > 1 else axes.flatten()
     
     for i, param in enumerate(params):
         ax = axes[i]

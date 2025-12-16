@@ -17,6 +17,7 @@ The GA uses standard evolutionary operators:
 
 import random
 import numpy as np
+import pandas as pd
 from typing import List, Dict, Callable, Tuple, Optional
 import copy
 
@@ -63,6 +64,7 @@ class GeneticAlgorithm:
         population_size: int = 50,
         elite_size: int = 5,
         mutation_rate: float = 0.1,
+        mutation_std_ratio: float = 0.1,
         crossover_rate: float = 0.8,
         tournament_size: int = 3,
         selection_method: str = "tournament",
@@ -79,6 +81,7 @@ class GeneticAlgorithm:
             population_size: Number of individuals in the population
             elite_size: Number of best individuals to preserve each generation
             mutation_rate: Probability of mutation for each gene
+            mutation_std_ratio: Ratio of parameter range to use as mutation std dev (default 0.1)
             crossover_rate: Probability of crossover between parents
             tournament_size: Size of tournament for tournament selection
             selection_method: "tournament" or "roulette"
@@ -91,6 +94,7 @@ class GeneticAlgorithm:
         self.population_size = population_size
         self.elite_size = elite_size
         self.mutation_rate = mutation_rate
+        self.mutation_std_ratio = mutation_std_ratio
         self.crossover_rate = crossover_rate
         self.tournament_size = tournament_size
         self.selection_method = selection_method
@@ -260,8 +264,8 @@ class GeneticAlgorithm:
         """
         for param, (min_val, max_val) in self.param_bounds.items():
             if random.random() < self.mutation_rate:
-                # Gaussian mutation with standard deviation = 10% of range
-                std_dev = (max_val - min_val) * 0.1
+                # Gaussian mutation with configurable standard deviation
+                std_dev = (max_val - min_val) * self.mutation_std_ratio
                 mutation = np.random.normal(0, std_dev)
                 individual.genes[param] += mutation
                 
@@ -364,7 +368,6 @@ class GeneticAlgorithm:
         Returns:
             DataFrame with columns: generation, best_fitness, avg_fitness, worst_fitness
         """
-        import pandas as pd
         return pd.DataFrame(self.history)
 
 

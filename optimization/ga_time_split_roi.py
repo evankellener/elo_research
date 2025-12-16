@@ -92,11 +92,12 @@ def create_roi_fitness_function(df, split_months=6):
     # Sort by date
     df = df.sort_values("DATE").reset_index(drop=True)
     
-    # Calculate time splits
+    # Calculate time splits using DateOffset for accuracy
     min_date = df["DATE"].min()
     max_date = df["DATE"].max()
     total_days = (max_date - min_date).days
-    split_days = split_months * 30  # Approximate
+    # More accurate month calculation
+    split_days = int((pd.DateOffset(months=split_months).delta.total_seconds() / 86400) if hasattr(pd.DateOffset(months=split_months), 'delta') else split_months * 30.44)
     
     def fitness_function(params):
         """

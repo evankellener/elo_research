@@ -375,10 +375,5 @@ class TestGAWithConstraints(unittest.TestCase):
         self.assertLess(abs(best.genes['y'] + 3), 1.0)
 
 
-def run_tests():
-    """Run all tests."""
-    unittest.main(argv=[''], exit=False, verbosity=2)
-
-
 if __name__ == '__main__':
-    run_tests()
+    unittest.main(argv=[''], exit=False, verbosity=2)
