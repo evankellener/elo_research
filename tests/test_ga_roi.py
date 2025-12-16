@@ -20,7 +20,7 @@ from full_genetic_with_k_denom_mov import (
     compute_prediction_metrics,
     compute_extended_roi_metrics,
 )
-from elo_utils import add_bout_counts
+from elo.elo_utils import add_bout_counts
 
 # Module-level path constants for skipIf decorators
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

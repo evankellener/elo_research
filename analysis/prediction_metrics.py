@@ -12,7 +12,7 @@ import math
 import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score, precision_score, recall_score
-from elo_utils import build_fighter_history, has_prior_history
+from elo.elo_utils import build_fighter_history, has_prior_history
 
 
 # =========================

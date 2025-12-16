@@ -40,7 +40,7 @@ import pandas as pd
 # Add scripts directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from time_splitter import create_time_splits, detect_time_column, get_split_info
+from elo.time_splitter import create_time_splits, detect_time_column, get_split_info
 from full_genetic_with_k_denom_mov import (
     run_basic_elo,
     evaluate_params_roi,
@@ -52,7 +52,7 @@ from full_genetic_with_k_denom_mov import (
     build_bidirectional_odds_lookup,
     american_odds_to_decimal,
 )
-from elo_utils import add_bout_counts, build_fighter_history, has_prior_history
+from elo.elo_utils import add_bout_counts, build_fighter_history, has_prior_history
 
 
 def compute_split_roi(

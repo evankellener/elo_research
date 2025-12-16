@@ -18,7 +18,7 @@ from ga_time_split_roi import (
     ga_search_time_split_roi,
     save_results,
 )
-from time_splitter import create_time_splits
+from elo.time_splitter import create_time_splits
 
 # Module-level path constants
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

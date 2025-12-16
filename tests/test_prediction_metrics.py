@@ -10,7 +10,7 @@ import os
 # Add scripts directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from prediction_metrics import (
+from analysis.prediction_metrics import (
     compute_expected_calibration_error,
     compute_calibration_slope,
     compute_all_calibration_metrics,

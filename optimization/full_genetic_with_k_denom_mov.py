@@ -8,11 +8,11 @@ import unicodedata
 from datetime import datetime
 from multiprocessing import Pool, cpu_count
 from functools import partial
-from elo_utils import (
+from elo.elo_utils import (
     mov_factor, build_fighter_history, has_prior_history, add_bout_counts, apply_decay,
     apply_multiphase_decay, build_fighter_weight_history, detect_weight_change, calculate_expected_value
 )
-from prediction_metrics import (
+from analysis.prediction_metrics import (
     compute_comprehensive_metrics, compute_composite_fitness,
     compute_all_calibration_metrics, compute_all_consistency_metrics,
     compute_all_performance_metrics, compute_all_bet_quality_metrics
