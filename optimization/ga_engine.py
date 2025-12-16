@@ -20,6 +20,11 @@ import numpy as np
 import pandas as pd
 from typing import List, Dict, Callable, Tuple, Optional
 import copy
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 class Individual:
@@ -377,13 +382,14 @@ def create_elo_fitness_function(
     base_elo: float = 1500,
     use_validation_split: bool = True,
     validation_percentile: float = 0.8,
-    optimize_for: str = "accuracy"
+    optimize_for: str = "composite",
+    fitness_weights: Optional[Dict[str, float]] = None
 ) -> Callable[[Dict[str, float]], float]:
     """
     Create a fitness function for Elo parameter optimization.
     
     This function returns a fitness function that can be used with the genetic
-    algorithm to optimize Elo parameters.
+    algorithm to optimize Elo parameters using multiple metrics.
     
     Args:
         df: Training DataFrame with fight data
@@ -391,12 +397,25 @@ def create_elo_fitness_function(
         base_elo: Base Elo rating for new fighters
         use_validation_split: Whether to use time-based validation split
         validation_percentile: Percentile for validation split
-        optimize_for: "accuracy" for prediction accuracy or "roi" for betting ROI
+        optimize_for: "accuracy", "roi", or "composite" (default)
+        fitness_weights: Optional dict for composite fitness. Keys: 
+            'accuracy', 'log_loss', 'brier_score', 'roi'
+            Default: {'accuracy': 0.3, 'log_loss': 0.2, 'brier_score': 0.2, 'roi': 0.3}
         
     Returns:
         Fitness function that takes parameter dict and returns fitness score
     """
-    from optimization.optimal_k_with_mov import run_basic_elo, elo_accuracy
+    from optimization.optimal_k_with_mov import run_basic_elo, elo_accuracy, compute_fight_predictions
+    import numpy as np
+    
+    # Default fitness weights for composite mode
+    if fitness_weights is None:
+        fitness_weights = {
+            'accuracy': 0.3,
+            'log_loss': 0.2, 
+            'brier_score': 0.2,
+            'roi': 0.3
+        }
     
     if use_validation_split:
         cutoff = df["DATE"].quantile(validation_percentile)
@@ -404,48 +423,137 @@ def create_elo_fitness_function(
         cutoff = None
     
     def fitness_function(params: Dict[str, float]) -> float:
-        """Evaluate fitness for a parameter set."""
+        """Evaluate fitness for a parameter set using multiple metrics."""
         # Extract parameters with defaults
         k = params.get("k", 32)
         denominator = params.get("denominator", 400)
+        confidence_threshold = params.get("confidence_threshold", 50)
         
         # MOV weights (use defaults if not in params)
         use_mov = any(key.startswith("w_") for key in params.keys())
         
         # Run Elo with these parameters
-        if use_mov:
-            # Create a modified version of run_basic_elo that uses custom MOV weights
-            # For now, use the standard run_basic_elo
+        try:
             trial = run_basic_elo(
                 df.copy(),
                 k=k,
                 base_elo=base_elo,
                 denominator=denominator,
-                use_mov=True
+                use_mov=use_mov
             )
-        else:
-            trial = run_basic_elo(
-                df.copy(),
-                k=k,
-                base_elo=base_elo,
-                denominator=denominator,
-                use_mov=False
-            )
+        except Exception:
+            return 0.0
         
-        # Calculate fitness
-        if optimize_for == "accuracy":
-            acc_all, acc_future, n_future = elo_accuracy(trial, cutoff)
-            # Prefer future accuracy if available, otherwise use overall
-            fitness = acc_future if acc_future is not None else acc_all
-            if fitness is None:
-                fitness = 0.0
+        # Get predictions on validation set
+        if cutoff is not None:
+            val_df = trial[trial["DATE"] > cutoff].copy()
         else:
-            # For ROI optimization, we would need additional logic
-            # For now, default to accuracy
-            acc_all, acc_future, n_future = elo_accuracy(trial, cutoff)
-            fitness = acc_future if acc_future is not None else acc_all
-            if fitness is None:
-                fitness = 0.0
+            val_df = trial.copy()
+        
+        # Compute predictions with prior history filtering
+        preds_df = compute_fight_predictions(val_df)
+        
+        if len(preds_df) == 0:
+            return 0.0
+        
+        # Extract predictions and actuals
+        predictions = []
+        actuals = []
+        for _, row in val_df.iterrows():
+            if row.get("result") not in (0, 1):
+                continue
+            if pd.isna(row.get("DATE")):
+                continue
+            if row.get("precomp_elo") == row.get("opp_precomp_elo"):
+                continue
+            
+            # Check bout counts
+            bout1 = row.get("precomp_boutcount", 0)
+            bout2 = row.get("opp_precomp_boutcount", 0)
+            if pd.isna(bout1) or pd.isna(bout2) or bout1 < 1 or bout2 < 1:
+                continue
+            
+            # Calculate prediction probability
+            elo_diff = row["precomp_elo"] - row["opp_precomp_elo"]
+            pred_prob = 1.0 / (1.0 + 10.0 ** (-elo_diff / denominator))
+            
+            predictions.append(pred_prob)
+            actuals.append(int(row["result"]))
+        
+        if len(predictions) == 0:
+            return 0.0
+        
+        predictions = np.array(predictions)
+        actuals = np.array(actuals)
+        
+        # Calculate different metrics
+        if optimize_for == "accuracy":
+            # Simple accuracy
+            pred_labels = (predictions > 0.5).astype(int)
+            fitness = np.mean(pred_labels == actuals)
+        
+        elif optimize_for == "roi":
+            # Simple ROI calculation
+            total_profit = 0
+            total_bets = 0
+            for pred, actual in zip(predictions, actuals):
+                elo_diff = abs(predictions[0] - 0.5) * 2  # Rough confidence
+                if elo_diff * 1000 >= confidence_threshold:  # Only bet if confident
+                    pred_winner = 1 if pred > 0.5 else 0
+                    if pred_winner == actual:
+                        total_profit += 1
+                    else:
+                        total_profit -= 1
+                    total_bets += 1
+            
+            roi = (total_profit / total_bets) if total_bets > 0 else 0.0
+            fitness = roi
+        
+        else:  # composite
+            # Accuracy component
+            pred_labels = (predictions > 0.5).astype(int)
+            accuracy = np.mean(pred_labels == actuals)
+            
+            # Log Loss component (lower is better, so negate and scale)
+            eps = 1e-15
+            predictions_clipped = np.clip(predictions, eps, 1 - eps)
+            log_loss = -np.mean(
+                actuals * np.log(predictions_clipped) +
+                (1 - actuals) * np.log(1 - predictions_clipped)
+            )
+            # Scale log loss: perfect = 0, random = 0.693, invert to make higher better
+            log_loss_score = max(0, 1.0 - log_loss / 0.693)
+            
+            # Brier Score component (lower is better, so invert)
+            brier_score = np.mean((predictions - actuals) ** 2)
+            # Scale: perfect = 0, random = 0.25, invert to make higher better
+            brier_score_score = max(0, 1.0 - brier_score / 0.25)
+            
+            # ROI component
+            total_profit = 0
+            total_bets = 0
+            for i, (pred, actual) in enumerate(zip(predictions, actuals)):
+                # Calculate confidence based on distance from 0.5
+                elo_diff_val = abs(pred - 0.5) * 1000  # Scale to Elo points
+                if elo_diff_val >= confidence_threshold:
+                    pred_winner = 1 if pred > 0.5 else 0
+                    if pred_winner == actual:
+                        total_profit += 1
+                    else:
+                        total_profit -= 1
+                    total_bets += 1
+            
+            roi = (total_profit / total_bets) if total_bets > 0 else 0.0
+            # Scale ROI: -1.0 to 1.0 -> 0.0 to 1.0
+            roi_score = (roi + 1.0) / 2.0
+            
+            # Combine with weights
+            fitness = (
+                fitness_weights.get('accuracy', 0.3) * accuracy +
+                fitness_weights.get('log_loss', 0.2) * log_loss_score +
+                fitness_weights.get('brier_score', 0.2) * brier_score_score +
+                fitness_weights.get('roi', 0.3) * roi_score
+            )
         
         return fitness
     

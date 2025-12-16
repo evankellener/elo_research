@@ -52,10 +52,12 @@ def optimize_elo_parameters_with_ga(
     mutation_rate=0.1,
     crossover_rate=0.8,
     early_stop_generations=15,
+    optimize_for="composite",
+    fitness_weights=None,
     verbose=True
 ):
     """
-    Optimize Elo parameters using genetic algorithm.
+    Optimize Elo parameters using genetic algorithm with multiple metrics.
     
     Args:
         df: Training DataFrame with fight data
@@ -66,6 +68,10 @@ def optimize_elo_parameters_with_ga(
         mutation_rate: Probability of mutation
         crossover_rate: Probability of crossover
         early_stop_generations: Stop if no improvement for this many generations
+        optimize_for: "accuracy", "roi", or "composite" (default)
+        fitness_weights: Optional dict for composite fitness. Keys: 
+            'accuracy', 'log_loss', 'brier_score', 'roi'
+            Default: {'accuracy': 0.3, 'log_loss': 0.2, 'brier_score': 0.2, 'roi': 0.3}
         verbose: Print progress
         
     Returns:
@@ -76,6 +82,7 @@ def optimize_elo_parameters_with_ga(
         param_bounds = {
             'k': (10, 500),
             'denominator': (200, 600),
+            'confidence_threshold': (30, 150),  # For ROI calculation
             'w_ko': (1.0, 2.0),
             'w_sub': (1.0, 2.0),
             'w_udec': (0.8, 1.5),
@@ -92,16 +99,20 @@ def optimize_elo_parameters_with_ga(
         print(f"Elite size: {elite_size}")
         print(f"Mutation rate: {mutation_rate}")
         print(f"Crossover rate: {crossover_rate}")
+        print(f"Optimization mode: {optimize_for}")
         print(f"Parameters to optimize: {list(param_bounds.keys())}")
+        if fitness_weights:
+            print(f"Fitness weights: {fitness_weights}")
         print("="*60 + "\n")
     
-    # Create fitness function
+    # Create fitness function with composite metrics
     fitness_fn = create_elo_fitness_function(
         df,
         base_elo=1500,
         use_validation_split=True,
         validation_percentile=0.8,
-        optimize_for="accuracy"
+        optimize_for=optimize_for,
+        fitness_weights=fitness_weights
     )
     
     # Create and run GA
@@ -325,6 +336,7 @@ if __name__ == "__main__":
     param_bounds = {
         'k': (10, 500),
         'denominator': (200, 600),
+        'confidence_threshold': (30, 150),  # For ROI calculation
         'w_ko': (1.0, 2.0),
         'w_sub': (1.0, 2.0),
         'w_udec': (0.8, 1.5),
@@ -332,7 +344,23 @@ if __name__ == "__main__":
         'w_sdec': (0.5, 1.2),
     }
     
-    # Run GA optimization
+    # Define fitness weights for composite optimization
+    # These weights determine how much each metric contributes to the fitness score
+    fitness_weights = {
+        'accuracy': 0.3,       # Prediction accuracy (30%)
+        'log_loss': 0.2,       # Log loss / cross-entropy (20%)
+        'brier_score': 0.2,    # Brier score (20%)
+        'roi': 0.3             # Return on investment (30%)
+    }
+    
+    print("Fitness function uses composite metrics:")
+    print(f"  - Accuracy: {fitness_weights['accuracy']*100:.0f}%")
+    print(f"  - Log Loss: {fitness_weights['log_loss']*100:.0f}%")
+    print(f"  - Brier Score: {fitness_weights['brier_score']*100:.0f}%")
+    print(f"  - ROI: {fitness_weights['roi']*100:.0f}%")
+    print()
+    
+    # Run GA optimization with composite metrics
     best_individual, ga = optimize_elo_parameters_with_ga(
         df,
         param_bounds=param_bounds,
@@ -342,6 +370,8 @@ if __name__ == "__main__":
         mutation_rate=0.15,
         crossover_rate=0.8,
         early_stop_generations=15,
+        optimize_for="composite",
+        fitness_weights=fitness_weights,
         verbose=True
     )
     
@@ -370,4 +400,5 @@ if __name__ == "__main__":
     print("\nBest parameters found:")
     for param, value in best_individual.genes.items():
         print(f"  {param}: {value:.4f}")
-    print(f"\nBest fitness (accuracy): {best_individual.fitness:.6f}")
+    print(f"\nBest composite fitness score: {best_individual.fitness:.6f}")
+    print("(Composite of: accuracy, log loss, Brier score, and ROI)")

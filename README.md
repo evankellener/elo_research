@@ -149,6 +149,16 @@ The genetic algorithm approach (`full_genetic_with_k_denom_mov.py` and `ga_time_
 - **MOV weights**: Five weights for different outcomes (KO, Sub, UD, MD, SD)
 - **Confidence threshold**: For ROI optimization, minimum Elo difference to bet
 
+**Fitness Function - Composite Metrics:**
+
+The GA optimizes using a weighted combination of multiple metrics:
+- **Accuracy** (30%): Prediction accuracy on validation set
+- **Log Loss** (20%): Cross-entropy loss (lower is better)
+- **Brier Score** (20%): Mean squared error of probabilities (lower is better)
+- **ROI** (30%): Return on investment for confident predictions
+
+This multi-metric approach ensures the model is well-calibrated, accurate, and profitable, rather than optimizing for just one dimension.
+
 **How Genetic Algorithms Work:**
 
 Unlike grid search which tests predefined values, genetic algorithms use evolutionary operators:
