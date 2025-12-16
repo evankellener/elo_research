@@ -1,0 +1,384 @@
+"""
+Tests for the genetic algorithm engine.
+
+This module tests the core GA functionality including:
+- Population initialization
+- Selection methods
+- Crossover operations
+- Mutation operations
+- Evolution and convergence
+"""
+
+import unittest
+import numpy as np
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from optimization.ga_engine import Individual, GeneticAlgorithm
+
+
+class TestIndividual(unittest.TestCase):
+    """Test the Individual class."""
+    
+    def test_initialization(self):
+        """Test individual creation."""
+        genes = {'x': 1.0, 'y': 2.0}
+        ind = Individual(genes)
+        self.assertEqual(ind.genes, genes)
+        self.assertIsNone(ind.fitness)
+    
+    def test_copy(self):
+        """Test individual copying."""
+        genes = {'x': 1.0, 'y': 2.0}
+        ind1 = Individual(genes)
+        ind1.fitness = 0.5
+        
+        ind2 = ind1.copy()
+        self.assertEqual(ind1.genes, ind2.genes)
+        self.assertEqual(ind1.fitness, ind2.fitness)
+        
+        # Modify copy and ensure original unchanged
+        ind2.genes['x'] = 5.0
+        self.assertEqual(ind1.genes['x'], 1.0)
+
+
+class TestGeneticAlgorithm(unittest.TestCase):
+    """Test the GeneticAlgorithm class."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        # Simple quadratic fitness function: maximize -(x^2 + y^2)
+        # Optimum at (0, 0) with fitness 0
+        def fitness_fn(genes):
+            x = genes.get('x', 0)
+            y = genes.get('y', 0)
+            return -(x**2 + y**2)
+        
+        self.fitness_fn = fitness_fn
+        self.param_bounds = {
+            'x': (-10, 10),
+            'y': (-10, 10)
+        }
+    
+    def test_initialization(self):
+        """Test GA initialization."""
+        ga = GeneticAlgorithm(
+            param_bounds=self.param_bounds,
+            fitness_fn=self.fitness_fn,
+            population_size=20,
+            random_seed=42,
+            verbose=False
+        )
+        
+        self.assertEqual(len(ga.population), 0)
+        self.assertIsNone(ga.best_individual)
+    
+    def test_population_initialization(self):
+        """Test population initialization."""
+        ga = GeneticAlgorithm(
+            param_bounds=self.param_bounds,
+            fitness_fn=self.fitness_fn,
+            population_size=20,
+            random_seed=42,
+            verbose=False
+        )
+        
+        ga.initialize_population()
+        
+        self.assertEqual(len(ga.population), 20)
+        
+        # Check that all individuals have correct genes
+        for ind in ga.population:
+            self.assertIn('x', ind.genes)
+            self.assertIn('y', ind.genes)
+            self.assertGreaterEqual(ind.genes['x'], -10)
+            self.assertLessEqual(ind.genes['x'], 10)
+            self.assertGreaterEqual(ind.genes['y'], -10)
+            self.assertLessEqual(ind.genes['y'], 10)
+    
+    def test_evaluation(self):
+        """Test fitness evaluation."""
+        ga = GeneticAlgorithm(
+            param_bounds=self.param_bounds,
+            fitness_fn=self.fitness_fn,
+            population_size=20,
+            random_seed=42,
+            verbose=False
+        )
+        
+        ga.initialize_population()
+        ga.evaluate_population()
+        
+        # All individuals should have fitness
+        for ind in ga.population:
+            self.assertIsNotNone(ind.fitness)
+        
+        # Best individual should be set
+        self.assertIsNotNone(ga.best_individual)
+        
+        # Population should be sorted by fitness
+        for i in range(len(ga.population) - 1):
+            self.assertGreaterEqual(ga.population[i].fitness, ga.population[i+1].fitness)
+    
+    def test_tournament_selection(self):
+        """Test tournament selection."""
+        ga = GeneticAlgorithm(
+            param_bounds=self.param_bounds,
+            fitness_fn=self.fitness_fn,
+            population_size=20,
+            tournament_size=3,
+            selection_method="tournament",
+            random_seed=42,
+            verbose=False
+        )
+        
+        ga.initialize_population()
+        ga.evaluate_population()
+        
+        # Select a parent
+        parent = ga.select_parent()
+        
+        self.assertIsInstance(parent, Individual)
+        self.assertIsNotNone(parent.fitness)
+    
+    def test_roulette_selection(self):
+        """Test roulette wheel selection."""
+        ga = GeneticAlgorithm(
+            param_bounds=self.param_bounds,
+            fitness_fn=self.fitness_fn,
+            population_size=20,
+            selection_method="roulette",
+            random_seed=42,
+            verbose=False
+        )
+        
+        ga.initialize_population()
+        ga.evaluate_population()
+        
+        # Select a parent
+        parent = ga.select_parent()
+        
+        self.assertIsInstance(parent, Individual)
+        self.assertIsNotNone(parent.fitness)
+    
+    def test_uniform_crossover(self):
+        """Test uniform crossover."""
+        ga = GeneticAlgorithm(
+            param_bounds=self.param_bounds,
+            fitness_fn=self.fitness_fn,
+            population_size=20,
+            crossover_method="uniform",
+            crossover_rate=1.0,  # Always crossover
+            random_seed=42,
+            verbose=False
+        )
+        
+        parent1 = Individual({'x': 1.0, 'y': 2.0})
+        parent2 = Individual({'x': 3.0, 'y': 4.0})
+        
+        child1, child2 = ga.crossover(parent1, parent2)
+        
+        self.assertIsInstance(child1, Individual)
+        self.assertIsInstance(child2, Individual)
+        self.assertIn('x', child1.genes)
+        self.assertIn('y', child1.genes)
+    
+    def test_mutation(self):
+        """Test mutation."""
+        ga = GeneticAlgorithm(
+            param_bounds=self.param_bounds,
+            fitness_fn=self.fitness_fn,
+            population_size=20,
+            mutation_rate=1.0,  # Always mutate
+            random_seed=42,
+            verbose=False
+        )
+        
+        ind = Individual({'x': 5.0, 'y': 5.0})
+        ind.fitness = 0.5
+        
+        original_x = ind.genes['x']
+        original_y = ind.genes['y']
+        
+        mutated = ga.mutate(ind)
+        
+        # At least one gene should have changed (with high probability)
+        self.assertTrue(
+            mutated.genes['x'] != original_x or mutated.genes['y'] != original_y
+        )
+        
+        # Fitness should be cleared
+        self.assertIsNone(mutated.fitness)
+        
+        # Genes should be within bounds
+        self.assertGreaterEqual(mutated.genes['x'], -10)
+        self.assertLessEqual(mutated.genes['x'], 10)
+        self.assertGreaterEqual(mutated.genes['y'], -10)
+        self.assertLessEqual(mutated.genes['y'], 10)
+    
+    def test_evolution(self):
+        """Test one generation of evolution."""
+        ga = GeneticAlgorithm(
+            param_bounds=self.param_bounds,
+            fitness_fn=self.fitness_fn,
+            population_size=20,
+            elite_size=2,
+            random_seed=42,
+            verbose=False
+        )
+        
+        ga.initialize_population()
+        ga.evaluate_population()
+        
+        best_before = ga.best_individual.fitness
+        
+        ga.evolve_generation()
+        ga.evaluate_population()
+        
+        # Population size should remain constant
+        self.assertEqual(len(ga.population), 20)
+        
+        # All individuals should have fitness
+        for ind in ga.population:
+            self.assertIsNotNone(ind.fitness)
+    
+    def test_convergence(self):
+        """Test that GA converges toward optimum."""
+        ga = GeneticAlgorithm(
+            param_bounds=self.param_bounds,
+            fitness_fn=self.fitness_fn,
+            population_size=30,
+            elite_size=3,
+            mutation_rate=0.1,
+            crossover_rate=0.8,
+            random_seed=42,
+            verbose=False
+        )
+        
+        best = ga.run(generations=50)
+        
+        # Best fitness should be close to 0 (the optimum)
+        self.assertGreater(best.fitness, -1.0)  # Should be close to 0
+        
+        # Best genes should be close to (0, 0)
+        self.assertLess(abs(best.genes['x']), 2.0)
+        self.assertLess(abs(best.genes['y']), 2.0)
+        
+        # History should be recorded
+        self.assertGreater(len(ga.history), 0)
+    
+    def test_elitism(self):
+        """Test that elitism preserves best individuals."""
+        ga = GeneticAlgorithm(
+            param_bounds=self.param_bounds,
+            fitness_fn=self.fitness_fn,
+            population_size=20,
+            elite_size=3,
+            random_seed=42,
+            verbose=False
+        )
+        
+        ga.initialize_population()
+        ga.evaluate_population()
+        
+        # Get top 3 individuals
+        elite_before = [ind.copy() for ind in ga.population[:3]]
+        
+        ga.evolve_generation()
+        
+        # Top 3 should be in new population (exact same objects due to copy)
+        new_population_genes = [ind.genes for ind in ga.population]
+        for elite_ind in elite_before:
+            # Check if this elite's genes are in the new population
+            found = any(
+                all(abs(elite_ind.genes[k] - ind_genes[k]) < 1e-10 for k in elite_ind.genes.keys())
+                for ind_genes in new_population_genes
+            )
+            self.assertTrue(found, "Elite individual not preserved")
+    
+    def test_early_stopping(self):
+        """Test early stopping mechanism."""
+        # Use a fitness function that converges quickly
+        def simple_fitness(genes):
+            return -abs(genes['x'])
+        
+        ga = GeneticAlgorithm(
+            param_bounds={'x': (-10, 10)},
+            fitness_fn=simple_fitness,
+            population_size=20,
+            random_seed=42,
+            verbose=False
+        )
+        
+        best = ga.run(generations=1000, early_stop_generations=10)
+        
+        # Should stop before 1000 generations
+        self.assertLess(len(ga.history), 1000)
+
+
+class TestGAWithConstraints(unittest.TestCase):
+    """Test GA with more complex fitness functions."""
+    
+    def test_sphere_function(self):
+        """Test optimization of sphere function in 5D."""
+        def sphere_fitness(genes):
+            return -sum(genes[f'x{i}']**2 for i in range(5))
+        
+        param_bounds = {f'x{i}': (-10, 10) for i in range(5)}
+        
+        ga = GeneticAlgorithm(
+            param_bounds=param_bounds,
+            fitness_fn=sphere_fitness,
+            population_size=50,
+            elite_size=5,
+            mutation_rate=0.1,
+            crossover_rate=0.8,
+            random_seed=42,
+            verbose=False
+        )
+        
+        best = ga.run(generations=100)
+        
+        # Should converge close to zero
+        self.assertGreater(best.fitness, -10.0)
+        
+        # All genes should be close to 0
+        for i in range(5):
+            self.assertLess(abs(best.genes[f'x{i}']), 3.0)
+    
+    def test_asymmetric_bounds(self):
+        """Test GA with asymmetric parameter bounds."""
+        def asymmetric_fitness(genes):
+            # Optimum at x=5, y=-3
+            return -((genes['x'] - 5)**2 + (genes['y'] + 3)**2)
+        
+        param_bounds = {
+            'x': (0, 10),
+            'y': (-10, 0)
+        }
+        
+        ga = GeneticAlgorithm(
+            param_bounds=param_bounds,
+            fitness_fn=asymmetric_fitness,
+            population_size=30,
+            random_seed=42,
+            verbose=False
+        )
+        
+        best = ga.run(generations=80)
+        
+        # Should find optimum near (5, -3)
+        self.assertLess(abs(best.genes['x'] - 5), 1.0)
+        self.assertLess(abs(best.genes['y'] + 3), 1.0)
+
+
+def run_tests():
+    """Run all tests."""
+    unittest.main(argv=[''], exit=False, verbosity=2)
+
+
+if __name__ == '__main__':
+    run_tests()
