@@ -10,7 +10,7 @@ import os
 # Add scripts directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from time_splitter import (
+from elo.time_splitter import (
     detect_time_column,
     create_time_splits,
     create_time_splits_with_offset,

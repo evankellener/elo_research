@@ -37,7 +37,7 @@ from full_genetic_with_k_denom_mov import (
     build_bidirectional_odds_lookup,
     american_odds_to_decimal,
 )
-from elo_utils import add_bout_counts, build_fighter_history, has_prior_history, is_true
+from elo.elo_utils import add_bout_counts, build_fighter_history, has_prior_history, is_true
 
 
 # =============================================================================

@@ -1,97 +1,87 @@
-# Ground Up Elo
+# Elo Research
 
-An Elo rating system for fighter predictions with grid search optimization to find the optimal K-factor.
+An Elo rating system for MMA fighter predictions with genetic algorithm optimization.
 
-## Overview
+## Structure
 
-This project implements an Elo rating system to predict fight outcomes. It includes:
-
-- Basic Elo rating calculation with configurable K-factor
-- Grid search optimization to find the optimal K-factor based on prediction accuracy
-- Out-of-sample testing on future events
-- Visualization of accuracy trends over time
-
-## Files
-
-- `scripts/main.py` - Main Elo implementation with visualization functions
-- `scripts/elo_utils.py` - Utility functions for Elo calculations and Method of Victory scaling
-- `scripts/optimal_k_with_mov.py` - Grid search for K-factor optimization with Method of Victory (MOV) comparison and visualization
-- `scripts/time_splitter.py` - Time-based splitter for creating non-overlapping validation splits
-- `scripts/prediction_metrics.py` - Prediction calibration and consistency metrics
-- `data/interleaved_cleaned.csv` - Historical fight data for training
-- `data/past3_events.csv` - Recent events for out-of-sample testing
+```
+elo_research/
+├── main.py              # Main entry point for Elo rankings and visualizations
+├── elo/                 # Core Elo rating system modules
+│   ├── calculator.py    # Elo calculation functions
+│   ├── elo_utils.py     # Utility functions for Elo calculations
+│   ├── time_splitter.py # Time-based data splitting
+│   └── visualization.py # Visualization functions
+├── optimization/        # Genetic algorithm optimization scripts
+│   ├── full_genetic_with_k_denom_mov.py
+│   ├── ga_time_split_roi.py
+│   └── optimal_k_with_mov.py
+├── analysis/            # Analysis and diagnostic scripts
+│   ├── analyze_baseline_diagnostics.py
+│   ├── diagnostic_tests.py
+│   └── prediction_metrics.py
+├── tests/               # Test scripts
+├── data/                # Fight data
+└── images/              # Output images
+```
 
 ## Setup
 
-1. Create a virtual environment:
-```bash
-python3 -m venv elo_env
-source elo_env/bin/activate  # On Windows: elo_env\Scripts\activate
-```
-
-2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-## Usage
+## Quick Start
 
-Run the main Elo analysis:
-```bash
-python scripts/main.py
-```
-
-Run the MOV comparison analysis (compares Elo with and without Method of Victory weights using grid search):
-```bash
-python scripts/optimal_k_with_mov.py
-```
-
-### Updating GitHub Repository
-
-To automatically add, commit, and push all changes to GitHub:
+Run the main Elo analysis and visualizations:
 
 ```bash
-./push_to_github.sh
+python main.py
 ```
 
-Or with a custom commit message:
+This will:
+- Calculate basic Elo ratings
+- Calculate Elo with Method of Victory (MOV) weights
+- Display top fighters by Elo
+- Show current top rankings
+- Optionally graph fighter history
+
+## Optimization
+
+Run genetic algorithm to find optimal parameters:
+
 ```bash
-./push_to_github.sh "Your commit message here"
+python optimization/full_genetic_with_k_denom_mov.py
 ```
 
-The script will:
-1. Show current changes
-2. Stage all files
-3. Commit with your message (or a timestamped default)
-4. Push to GitHub
+Run time-split ROI optimization:
 
-## Methods/Math
+```bash
+python optimization/ga_time_split_roi.py --data-file data/interleaved_cleaned.csv --split-months 6
+```
 
-### Elo Rating System
+## Elo System
 
 The Elo rating system assigns each fighter a numerical rating that reflects their skill level. After each fight, ratings are updated based on the outcome versus the expected outcome.
 
-#### Expected Score
+### Expected Score
 
 Before a fight, we calculate the expected probability that Fighter 1 wins:
 
-### $E_1 = \frac{1}{1 + 10^{(R_2 - R_1) / 400}}$
-
+$$E_1 = \frac{1}{1 + 10^{(R_2 - R_1) / 400}}$$
 
 where:
 - $R_1$ is Fighter 1's current Elo rating
 - $R_2$ is Fighter 2's current Elo rating
 - The denominator (400) controls the sensitivity: a 400-point difference means one fighter is 10x more likely to win
 
-#### Rating Updates
+### Rating Updates
 
 After the fight, ratings are updated:
 
+$$R_1^{new} = R_1^{old} + K \cdot (S_1 - E_1)$$
 
-### $R_1^{new} = R_1^{old} + K \cdot (S_1 - E_1)$
-
-
-### $R_2^{new} = R_2^{old} + K \cdot (S_2 - E_2)$
+$$R_2^{new} = R_2^{old} + K \cdot (S_2 - E_2)$$
 
 where:
 - $S_1$ is the actual outcome (1 for Fighter 1 win, 0 for loss)
@@ -100,21 +90,20 @@ where:
 
 A higher K-factor means ratings update more quickly but can be more volatile. A lower K-factor means more stable ratings but slower adaptation to changes in fighter ability.
 
-#### Method of Victory Optimization
+### Method of Victory
 
-G-Elo: Generalized Elo using margin of victory (Szczecinski), is a research paper that proposes a slight change to the Elo algorithm by incorporating margin of victory (MOV) rather than only win/loss. In the MMA case, we would want to include things like unanimous decision vs split decision vs submission. 
+G-Elo: Generalized Elo using margin of victory (Szczecinski), is a research paper that proposes a slight change to the Elo algorithm by incorporating margin of victory (MOV) rather than only win/loss. In the MMA case, we would want to include things like unanimous decision vs split decision vs submission.
 
-##### Math change:
+#### Math change:
 
-Right now the update is: 
+Right now the update is:
 
-### $$R_1' = R_1 + K*(S_1 - E_1)$$
-### $$R_2' = R_2 + K*(S_2 - E_2)$$
+$$R_1' = R_1 + K*(S_1 - E_1)$$
+$$R_2' = R_2 + K*(S_2 - E_2)$$
 
-Now we change K to be 
+Now we change K to be:
 
-### $K_{\text{eff}} = K * M(fight)$ 
-
+$$K_{\text{eff}} = K * M(fight)$$
 
 $$
 M(\text{fight}) =
@@ -129,12 +118,19 @@ $$
 
 So the new update would be:
 
-### $R_1' = R_1 + K_{\text{eff}}*(S_1 - E_1)$
+$$R_1' = R_1 + K_{\text{eff}}*(S_1 - E_1)$$
+$$R_2' = R_2 + K_{\text{eff}}*(S_2 - E_2)$$
 
-### $R_2' = R_2 + K_{\text{eff}}*(S_2 - E_2)$
+MOV weights scale the K-factor based on fight outcome:
+- KO/TKO: 1.4x
+- Submission: 1.3x
+- Unanimous Decision: 1.0x
+- Majority Decision: 0.9x
+- Split Decision: 0.7x
 
+This reflects that more decisive victories should have larger rating impacts.
 
-#### Prediction
+### Prediction
 
 We predict Fighter 1 wins if $R_1 > R_2$, and Fighter 2 wins otherwise. Predictions are only made when both fighters have at least one prior fight in the historical data.
 
@@ -228,7 +224,4 @@ The visualization consists of four subplots comparing MOV vs No MOV across diffe
 
 ## Requirements
 
-- Python 3.7+
-- pandas
-- matplotlib
-- numpy
+See `requirements.txt` for dependencies.

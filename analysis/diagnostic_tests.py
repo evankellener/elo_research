@@ -44,7 +44,7 @@ from full_genetic_with_k_denom_mov import (
     american_odds_to_decimal,
     build_fighter_weight_history,
 )
-from elo_utils import add_bout_counts, build_fighter_history, has_prior_history
+from elo.elo_utils import add_bout_counts, build_fighter_history, has_prior_history
 
 
 def load_data():
