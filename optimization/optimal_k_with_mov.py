@@ -1,6 +1,6 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-from elo_utils import method_of_victory_scale, build_fighter_history, has_prior_history, add_bout_counts
+from elo.elo_utils import method_of_victory_scale, build_fighter_history, has_prior_history, add_bout_counts
 
 
 def run_basic_elo(df, k=32, base_elo=1500, denominator=400, use_mov=True, draw_k_factor=0.5):
