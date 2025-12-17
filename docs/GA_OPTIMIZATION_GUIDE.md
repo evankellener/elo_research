@@ -2,6 +2,8 @@
 
 This guide provides a comprehensive explanation of the Genetic Algorithm (GA) optimization system for Elo rating parameters, including all CLI commands and usage examples.
 
+> 📋 **Quick Reference**: Looking for a condensed command reference? See [GA_OPTIMIZATION_QUICK_REFERENCE.md](GA_OPTIMIZATION_QUICK_REFERENCE.md)
+
 ## Table of Contents
 
 1. [Overview](#overview)
