@@ -49,6 +49,12 @@ This will:
 
 ## Optimization
 
+For a **complete guide** to genetic algorithm optimization with detailed CLI commands, examples, and explanations, see:
+
+📘 **[GA Optimization Guide](docs/GA_OPTIMIZATION_GUIDE.md)**
+
+### Quick Commands
+
 Run genetic algorithm to find optimal parameters:
 
 ```bash
