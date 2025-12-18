@@ -397,9 +397,10 @@ def create_elo_fitness_function(
         base_elo: Base Elo rating for new fighters
         use_validation_split: Whether to use time-based validation split
         validation_percentile: Percentile for validation split
-        optimize_for: "accuracy" (default), "roi", or "composite"
-            - "accuracy": Simple prediction accuracy only
-            - "roi": Return on investment only  
+        optimize_for: "accuracy" (default), "roi", "log_loss", or "composite"
+            - "accuracy": Simple prediction accuracy only (higher is better, range: 0-1)
+            - "roi": Return on investment only (higher is better, range: -1 to 1)
+            - "log_loss": Logarithmic loss only (lower is better, converted to higher-is-better for GA)
             - "composite": Weighted combination of all metrics
         fitness_weights: Optional dict for composite fitness. Keys: 
             'accuracy', 'log_loss', 'brier_score', 'roi'
@@ -505,6 +506,18 @@ def create_elo_fitness_function(
             
             roi = (total_profit / total_bets) if total_bets > 0 else 0.0
             fitness = roi
+        
+        elif optimize_for == "log_loss":
+            # Log Loss (lower is better, so we invert it for GA maximization)
+            eps = 1e-15
+            predictions_clipped = np.clip(predictions, eps, 1 - eps)
+            log_loss = np.mean(
+                -(actuals * np.log(predictions_clipped) +
+                  (1 - actuals) * np.log(1 - predictions_clipped))
+            )
+            # Convert to fitness (higher is better): perfect log_loss=0, random=0.693
+            # We use 1.0 - (log_loss / 0.693) so that 0 -> 1.0 and 0.693 -> ~0.0
+            fitness = max(0, 1.0 - log_loss / 0.693)
         
         else:  # composite
             # Accuracy component
