@@ -147,6 +147,7 @@ def example_basic_optimization(optimize_for="accuracy"):
     # Save results to file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_file = f"ga_optimization_{optimize_for}_{timestamp}.json"
+    history_file = f"ga_optimization_{optimize_for}_{timestamp}_history.csv"
     
     # Prepare results dictionary
     results = {
@@ -168,16 +169,21 @@ def example_basic_optimization(optimize_for="accuracy"):
     if roi_percent is not None:
         results["best_roi_percent"] = roi_percent
     
-    with open(output_file, 'w') as f:
-        json.dump(results, f, indent=2)
+    # Save results with error handling
+    try:
+        with open(output_file, 'w') as f:
+            json.dump(results, f, indent=2)
+        print(f"\nResults saved to: {output_file}")
+    except (IOError, OSError) as e:
+        print(f"\nWarning: Could not save results to {output_file}: {e}")
     
-    print(f"\nResults saved to: {output_file}")
-    
-    # Also save history as CSV for easy plotting
-    history_file = f"ga_optimization_{optimize_for}_{timestamp}_history.csv"
-    history_df = ga.get_history_dataframe()
-    history_df.to_csv(history_file, index=False)
-    print(f"History saved to: {history_file}")
+    # Save history as CSV for easy plotting
+    try:
+        history_df = ga.get_history_dataframe()
+        history_df.to_csv(history_file, index=False)
+        print(f"History saved to: {history_file}")
+    except (IOError, OSError) as e:
+        print(f"Warning: Could not save history to {history_file}: {e}")
     
     return best_individual, ga
 
