@@ -23,6 +23,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import argparse
+import numpy as np
 import pandas as pd
 from optimization.ga_engine import GeneticAlgorithm, create_elo_fitness_function
 from optimization.optimal_k_with_mov import add_bout_counts
@@ -103,7 +104,6 @@ def example_basic_optimization(optimize_for="accuracy"):
     # Display the appropriate metric based on optimization target
     if optimize_for == "log_loss":
         # Convert fitness back to log_loss for display
-        import numpy as np
         fitness_clamped = max(best_individual.fitness, 1e-15)
         log_loss_value = -np.log(fitness_clamped)
         print(f"Best log loss: {log_loss_value:.4f}")

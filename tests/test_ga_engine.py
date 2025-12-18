@@ -452,10 +452,10 @@ class TestOptimizationModeDisplay(unittest.TestCase):
         """Test that fitness can be correctly converted back to log_loss."""
         # Test known fitness values and their corresponding log_loss values
         test_cases = [
-            (0.5, 0.693147),  # Random guessing: ln(2)
-            (1.0, 0.0),       # Perfect prediction
-            (0.6, 0.510826),  # Better than random
-            (0.4, 0.916291),  # Worse than random
+            (0.5, np.log(2)),      # Random guessing: ln(2) ≈ 0.693
+            (1.0, 0.0),            # Perfect prediction
+            (0.6, -np.log(0.6)),   # Better than random
+            (0.4, -np.log(0.4)),   # Worse than random
         ]
         
         for fitness, expected_log_loss in test_cases:
