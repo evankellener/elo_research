@@ -397,9 +397,10 @@ def create_elo_fitness_function(
         base_elo: Base Elo rating for new fighters
         use_validation_split: Whether to use time-based validation split
         validation_percentile: Percentile for validation split
-        optimize_for: "accuracy" (default), "roi", or "composite"
-            - "accuracy": Simple prediction accuracy only
-            - "roi": Return on investment only  
+        optimize_for: "accuracy" (default), "roi", "log_loss", or "composite"
+            - "accuracy": Simple prediction accuracy only (higher is better, range: 0-1)
+            - "roi": Return on investment only (higher is better, range: -1 to 1)
+            - "log_loss": Logarithmic loss only (lower is better, converted to higher-is-better for GA)
             - "composite": Weighted combination of all metrics
         fitness_weights: Optional dict for composite fitness. Keys: 
             'accuracy', 'log_loss', 'brier_score', 'roi'
@@ -494,8 +495,11 @@ def create_elo_fitness_function(
             total_profit = 0
             total_bets = 0
             for pred, actual in zip(predictions, actuals):
-                elo_diff = abs(predictions[0] - 0.5) * 2  # Rough confidence
-                if elo_diff * 1000 >= confidence_threshold:  # Only bet if confident
+                # Use prediction confidence (distance from 0.5) to determine if we should bet
+                confidence = abs(pred - 0.5) * 2  # Scale to 0-1 range
+                # Scale by 1000 to match typical Elo difference magnitude for threshold comparison
+                # e.g., confidence_threshold=50 means bet when confidence > 0.05 (5%)
+                if confidence * 1000 >= confidence_threshold:
                     pred_winner = 1 if pred > 0.5 else 0
                     if pred_winner == actual:
                         total_profit += 1
@@ -506,6 +510,22 @@ def create_elo_fitness_function(
             roi = (total_profit / total_bets) if total_bets > 0 else 0.0
             fitness = roi
         
+        elif optimize_for == "log_loss":
+            # Log Loss (lower is better, so we invert it for GA maximization)
+            eps = 1e-15
+            predictions_clipped = np.clip(predictions, eps, 1 - eps)
+            log_loss = np.mean(
+                -(actuals * np.log(predictions_clipped) +
+                  (1 - actuals) * np.log(1 - predictions_clipped))
+            )
+            # Convert to fitness (higher is better)
+            # Use exponential decay to map log_loss to fitness in range (0, 1]
+            # Perfect: log_loss=0 -> fitness=1.0
+            # Random: log_loss=ln(2)≈0.693 -> fitness≈0.5 (theoretical binary classifier random guess)
+            # Poor: log_loss>0.693 -> fitness<0.5
+            # This allows GA to distinguish between different "bad" models
+            fitness = np.exp(-log_loss)
+        
         else:  # composite
             # Accuracy component
             pred_labels = (predictions > 0.5).astype(int)
@@ -514,13 +534,12 @@ def create_elo_fitness_function(
             # Log Loss component (lower is better, so invert and scale)
             eps = 1e-15
             predictions_clipped = np.clip(predictions, eps, 1 - eps)
-            # Standard log loss (no extra negative sign)
             log_loss = np.mean(
                 -(actuals * np.log(predictions_clipped) +
                   (1 - actuals) * np.log(1 - predictions_clipped))
             )
-            # Scale log loss: perfect = 0, random = 0.693, invert to make higher better
-            log_loss_score = max(0, 1.0 - log_loss / 0.693)
+            # Use exponential mapping: log_loss=0 -> 1.0, log_loss=0.693 -> ~0.5
+            log_loss_score = np.exp(-log_loss)
             
             # Brier Score component (lower is better, so invert)
             brier_score = np.mean((predictions - actuals) ** 2)
