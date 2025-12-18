@@ -26,6 +26,11 @@ import os
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Constants for ROI calculation
+# Minimum probability for betting odds calculation (prevents extreme payouts)
+# 0.01 = 1% probability = 99:1 maximum odds
+MIN_BET_PROBABILITY = 0.01
+
 
 class Individual:
     """Represents a single candidate solution in the genetic algorithm."""
@@ -550,7 +555,7 @@ def create_elo_fitness_function(
                     # If pred_prob = 0.7 (70% favorite): payout = 1/0.7 - 1 ≈ 0.43 (bet $1 to win $0.43)
                     # If pred_prob = 0.3 (30% underdog): payout = 1/0.3 - 1 ≈ 2.33 (bet $1 to win $2.33)
                     # Clamp probability to avoid division by very small numbers
-                    pred_prob_clamped = max(pred_prob, 0.01)  # Minimum 1% probability (max 99:1 odds)
+                    pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
                     payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
                     
                     # We always bet 1 unit
@@ -622,7 +627,7 @@ def create_elo_fitness_function(
                     
                     # Calculate realistic payout based on implied odds
                     # Clamp probability to avoid division by very small numbers
-                    pred_prob_clamped = max(pred_prob, 0.01)
+                    pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
                     payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
                     
                     if pred_winner == actual:
