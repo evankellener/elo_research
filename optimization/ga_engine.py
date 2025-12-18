@@ -75,7 +75,8 @@ class GeneticAlgorithm:
         selection_method: str = "tournament",
         crossover_method: str = "uniform",
         random_seed: Optional[int] = None,
-        verbose: bool = True
+        verbose: bool = True,
+        optimization_mode: Optional[str] = None
     ):
         """
         Initialize the genetic algorithm.
@@ -93,6 +94,7 @@ class GeneticAlgorithm:
             crossover_method: "single", "two_point", or "uniform"
             random_seed: Random seed for reproducibility
             verbose: Print progress messages
+            optimization_mode: Optional optimization mode ("log_loss", etc.) for display formatting
         """
         self.param_bounds = param_bounds
         self.fitness_fn = fitness_fn
@@ -105,6 +107,7 @@ class GeneticAlgorithm:
         self.selection_method = selection_method
         self.crossover_method = crossover_method
         self.verbose = verbose
+        self.optimization_mode = optimization_mode
         
         if random_seed is not None:
             random.seed(random_seed)
@@ -302,6 +305,27 @@ class GeneticAlgorithm:
         
         self.population = new_population
     
+    def _format_metric_for_display(self, fitness: float) -> Tuple[str, float]:
+        """
+        Format fitness value for display based on optimization mode.
+        
+        Args:
+            fitness: The fitness value to format
+            
+        Returns:
+            Tuple of (metric_name, display_value) where:
+            - For log_loss mode: converts fitness back to log_loss (lower is better)
+            - For other modes: returns fitness as-is (higher is better)
+        """
+        if self.optimization_mode == "log_loss":
+            # Convert fitness back to log_loss: log_loss = -ln(fitness)
+            # Clamp fitness to avoid log(0)
+            fitness_clamped = max(fitness, 1e-15)
+            log_loss_value = -np.log(fitness_clamped)
+            return ("Log Loss", log_loss_value)
+        else:
+            return ("Fitness", fitness)
+    
     def run(self, generations: int, early_stop_generations: Optional[int] = None) -> Individual:
         """
         Run the genetic algorithm for a specified number of generations.
@@ -337,9 +361,20 @@ class GeneticAlgorithm:
             })
             
             if self.verbose:
-                print(f"Generation {gen + 1}/{generations}: "
-                      f"Best={best_fitness:.6f}, Avg={avg_fitness:.6f}, "
-                      f"Worst={worst_fitness:.6f}")
+                # Format display values based on optimization mode
+                metric_name, best_display = self._format_metric_for_display(best_fitness)
+                _, avg_display = self._format_metric_for_display(avg_fitness)
+                _, worst_display = self._format_metric_for_display(worst_fitness)
+                
+                # For log_loss, swap best and worst labels since lower is better
+                if self.optimization_mode == "log_loss":
+                    print(f"Generation {gen + 1}/{generations}: "
+                          f"Best={best_display:.6f}, Avg={avg_display:.6f}, "
+                          f"Worst={worst_display:.6f}")
+                else:
+                    print(f"Generation {gen + 1}/{generations}: "
+                          f"Best={best_display:.6f}, Avg={avg_display:.6f}, "
+                          f"Worst={worst_display:.6f}")
             
             # Early stopping check
             if early_stop_generations and len(best_fitness_history) > 0:
@@ -359,7 +394,10 @@ class GeneticAlgorithm:
             print(f"\n{'='*60}")
             print("Optimization Complete!")
             print(f"{'='*60}")
-            print(f"Best fitness: {self.best_individual.fitness:.6f}")
+            
+            # Format final metric display
+            metric_name, final_display = self._format_metric_for_display(self.best_individual.fitness)
+            print(f"Best {metric_name.lower()}: {final_display:.6f}")
             print(f"Best parameters:")
             for param, value in self.best_individual.genes.items():
                 print(f"  {param}: {value:.4f}")
