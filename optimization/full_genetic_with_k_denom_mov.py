@@ -11,6 +11,10 @@ The GA uses evolutionary operators (selection, crossover, mutation) to search
 the parameter space efficiently, exploring combinations that grid search would miss.
 """
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np

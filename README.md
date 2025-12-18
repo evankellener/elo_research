@@ -28,11 +28,40 @@ elo_research/
 
 ## Setup
 
+### Prerequisites
+
+- Python 3.8 or higher
+- pip (Python package manager)
+
+### Installation
+
+1. Clone this repository:
+```bash
+git clone https://github.com/evankellener/elo_research.git
+cd elo_research
+```
+
+2. Install required dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
+This will install:
+- pandas (data manipulation)
+- numpy (numerical computing)
+- matplotlib (visualization)
+- scikit-learn (machine learning metrics)
+
+### Data Requirements
+
+Ensure you have the required data file in the `data/` directory:
+- `data/interleaved_cleaned.csv` - Historical MMA fight data
+
 ## Quick Start
+
+> **Note:** All commands below should be run from the repository root directory (`elo_research/`)
+
+### 1. Basic Elo Analysis
 
 Run the main Elo analysis and visualizations:
 
@@ -47,24 +76,168 @@ This will:
 - Show current top rankings
 - Optionally graph fighter history
 
-## Optimization
+### 2. Running the Genetic Algorithm (GA) Optimization
 
-For a **complete guide** to genetic algorithm optimization with detailed CLI commands, examples, and explanations, see:
+The GA optimization helps you find the best parameters for your Elo rating system. Here are three ways to run it, from simplest to most advanced:
 
-📘 **[GA Optimization Guide](docs/GA_OPTIMIZATION_GUIDE.md)**
+#### Option A: Quick Example (Best for Learning) ⭐ **START HERE**
 
-### Quick Commands
+Run a quick 5-minute example to understand how GA works:
 
-Run genetic algorithm to find optimal parameters:
+```bash
+python examples/example_ga_optimization.py
+```
+
+**What it does:**
+- Uses 3,000 recent fights for fast execution
+- Optimizes K-factor and denominator
+- Shows fitness improvement over generations
+- Takes ~5 minutes to complete
+
+**Example output (actual values will vary):**
+```
+======================================================================
+GENETIC ALGORITHM OPTIMIZATION EXAMPLE
+======================================================================
+Loading data...
+Using 3000 fights for optimization
+
+Running genetic algorithm...
+Generation 1/20: Best=0.5823, Avg=0.5645, Worst=0.5234
+Generation 5/20: Best=0.5912, Avg=0.5801, Worst=0.5623
+...
+Generation 20/20: Best=0.6034, Avg=0.5956, Worst=0.5823
+
+======================================================================
+RESULTS
+======================================================================
+Best K-factor: 72.45
+Best denominator: 436.78
+Best accuracy: 0.6034
+```
+
+**Note:** The exact parameter values and fitness scores will vary between runs due to the stochastic nature of genetic algorithms.
+
+**Try different optimization modes:**
+```bash
+# Optimize for prediction accuracy (default)
+python examples/example_ga_optimization.py --optimize-for accuracy
+
+# Optimize for betting profit (ROI)
+python examples/example_ga_optimization.py --optimize-for roi
+
+# Optimize for probability calibration (log loss)
+python examples/example_ga_optimization.py --optimize-for log_loss
+
+# Optimize for all metrics combined
+python examples/example_ga_optimization.py --optimize-for composite
+```
+
+#### Option B: Full Multi-Parameter Optimization (Production Quality)
+
+Optimize all Elo parameters for best overall performance:
 
 ```bash
 python optimization/full_genetic_with_k_denom_mov.py
 ```
 
-Run time-split ROI optimization:
+**What it optimizes:**
+- K-factor (10-500)
+- Denominator (200-600)
+- Confidence threshold (30-150)
+- 5 Method of Victory weights (KO, Submission, Unanimous/Majority/Split Decision)
+
+**Fitness function:** Balanced combination of accuracy, log loss, Brier score, and ROI
+
+**Runtime:** 30-60 minutes (uses all historical data)
+
+**Output files:**
+- `ga_optimization_history.csv` - Full optimization history
+- `images/ga_convergence.png` - Fitness convergence plot
+- `images/ga_parameter_evolution.png` - Parameter evolution over generations
+
+#### Option C: ROI-Focused Optimization (For Betting Strategies)
+
+Optimize specifically for betting profitability with time-series validation:
 
 ```bash
-python optimization/ga_time_split_roi.py --data-file data/interleaved_cleaned.csv --split-months 6
+python optimization/ga_time_split_roi.py
+```
+
+**What it does:**
+- Splits data into time-based validation windows (default: 6 months)
+- Optimizes K-factor, denominator, and confidence threshold
+- Maximizes average ROI across all time periods
+- Penalizes high variance (prefers stable returns)
+
+**Runtime:** 20-40 minutes
+
+**Customize settings:**
+```bash
+# Use 3-month windows (adapts faster to meta changes)
+python optimization/ga_time_split_roi.py --split-months 3
+
+# Use 12-month windows (more stable estimates)
+python optimization/ga_time_split_roi.py --split-months 12
+
+# Custom data file
+python optimization/ga_time_split_roi.py --data-file data/my_fights.csv
+
+# Larger population for better search
+python optimization/ga_time_split_roi.py --population-size 80 --generations 150
+```
+
+**Output files:**
+- `ga_roi_history.csv` - Optimization history
+- `ga_roi_best_params.txt` - Best parameters found
+- `images/ga_roi_results.png` - ROI visualization plots
+
+### 3. Detailed Documentation
+
+For comprehensive information about GA optimization, see:
+
+📘 **[Complete GA Optimization Guide](docs/GA_OPTIMIZATION_GUIDE.md)** - Detailed explanations, parameter tuning, and advanced usage
+
+📋 **[Quick Reference Card](docs/GA_OPTIMIZATION_QUICK_REFERENCE.md)** - Command cheat sheet
+
+## Troubleshooting
+
+### "ModuleNotFoundError: No module named 'pandas'" (or numpy/matplotlib/sklearn)
+
+**Solution:** Install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### "FileNotFoundError: data/interleaved_cleaned.csv"
+
+**Solution:** Ensure you're in the repository root directory and the data file exists
+```bash
+cd /path/to/elo_research
+ls data/  # Should show interleaved_cleaned.csv
+```
+
+If the data file is missing, you need to obtain the MMA fight data and place it in the `data/` directory.
+
+### GA optimization is too slow
+
+**Solution 1:** Start with the quick example (uses subset of data)
+```bash
+python examples/example_ga_optimization.py
+```
+
+**Solution 2:** Reduce the data size in the script by editing the file to use `df.tail(5000)` instead of all data
+
+**Solution 3:** Reduce population size and generations:
+```bash
+python optimization/ga_time_split_roi.py --population-size 20 --generations 30
+```
+
+### "command not found: python"
+
+**Solution:** Try using `python3` instead:
+```bash
+python3 examples/example_ga_optimization.py
 ```
 
 ## Elo System
