@@ -497,7 +497,9 @@ def create_elo_fitness_function(
             for pred, actual in zip(predictions, actuals):
                 # Use prediction confidence (distance from 0.5) to determine if we should bet
                 confidence = abs(pred - 0.5) * 2  # Scale to 0-1 range
-                if confidence * 1000 >= confidence_threshold:  # Only bet if confident
+                # Scale by 1000 to match typical Elo difference magnitude for threshold comparison
+                # e.g., confidence_threshold=50 means bet when confidence > 0.05 (5%)
+                if confidence * 1000 >= confidence_threshold:
                     pred_winner = 1 if pred > 0.5 else 0
                     if pred_winner == actual:
                         total_profit += 1
@@ -518,7 +520,9 @@ def create_elo_fitness_function(
             )
             # Convert to fitness (higher is better)
             # Use exponential decay to map log_loss to fitness in range (0, 1]
-            # Perfect log_loss=0 -> fitness=1.0, random log_loss=0.693 -> fitness~0.5
+            # Perfect: log_loss=0 -> fitness=1.0
+            # Random: log_loss=ln(2)≈0.693 -> fitness≈0.5 (theoretical binary classifier random guess)
+            # Poor: log_loss>0.693 -> fitness<0.5
             # This allows GA to distinguish between different "bad" models
             fitness = np.exp(-log_loss)
         
