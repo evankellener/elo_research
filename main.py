@@ -125,8 +125,11 @@ Examples:
   # Show ROI calculation (matches GA optimization setup)
   python main.py --k 10.0 --denominator 437.78 --show-roi --use-ga-setup
   
-  # Use only recent fights like GA optimization
+  # Evaluate on recent fights but use full Elo history (NEW DEFAULT)
   python main.py --k 10.0 --denominator 437.78 --show-roi --use-ga-setup --tail-fights 3000
+  
+  # Match exact GA optimization behavior (calculate Elo only on tail)
+  python main.py --k 10.0 --denominator 437.78 --show-roi --use-ga-setup --tail-fights 3000 --tail-only
   
   # Adjust confidence threshold for betting
   python main.py --k 10.0 --denominator 437.78 --show-roi --confidence-threshold 30
@@ -145,27 +148,40 @@ Examples:
     parser.add_argument('--use-ga-setup', action='store_true',
                         help='Use GA optimization setup (adds bout counts, filters by prior history)')
     parser.add_argument('--tail-fights', type=int, default=None,
-                        help='Use only the last N fights (like GA optimization uses tail 3000)')
+                        help='Display/evaluate only the last N fights (Elo still calculated on full history unless --tail-only)')
+    parser.add_argument('--tail-only', action='store_true',
+                        help='When used with --tail-fights, calculate Elo ONLY on tail fights (matches old GA behavior)')
     
     args = parser.parse_args()
     
-    df = pd.read_csv('data/interleaved_cleaned.csv', low_memory=False)
-    df['result'] = pd.to_numeric(df['result'], errors='coerce')
-    df['DATE'] = pd.to_datetime(df['DATE'])
-    df = df.sort_values('DATE').reset_index(drop=True)
+    # Load full dataset
+    df_full = pd.read_csv('data/interleaved_cleaned.csv', low_memory=False)
+    df_full['result'] = pd.to_numeric(df_full['result'], errors='coerce')
+    df_full['DATE'] = pd.to_datetime(df_full['DATE'])
+    df_full = df_full.sort_values('DATE').reset_index(drop=True)
     
-    # Apply tail filter if specified
+    # Handle tail_fights option
     if args.tail_fights:
-        df = df.tail(args.tail_fights).copy()
-        print(f"\nUsing last {args.tail_fights} fights (GA optimization style)")
+        if args.tail_only:
+            # Old behavior: Use ONLY tail fights for Elo calculation (matches GA optimization)
+            print(f"\nUsing ONLY last {args.tail_fights} fights for Elo calculation (GA style)")
+            df_full = df_full.tail(args.tail_fights).copy()
+        else:
+            # New behavior: Calculate Elo on full dataset, but display/evaluate only tail
+            print(f"\nCalculating Elo on full dataset ({len(df_full)} fights)")
+            print(f"Will display/evaluate only last {args.tail_fights} fights")
+            # Mark which fights are in the tail for later filtering
+            tail_start_idx = len(df_full) - args.tail_fights
+            df_full['in_tail'] = False
+            df_full.loc[tail_start_idx:, 'in_tail'] = True
     
     # Add bout counts if using GA setup
     if args.use_ga_setup:
-        df = add_bout_counts(df)
-        if "precomp_boutcount" in df.columns:
-            df["precomp_boutcount"] = pd.to_numeric(df["precomp_boutcount"], errors="coerce")
-        if "opp_precomp_boutcount" in df.columns:
-            df["opp_precomp_boutcount"] = pd.to_numeric(df["opp_precomp_boutcount"], errors="coerce")
+        df_full = add_bout_counts(df_full)
+        if "precomp_boutcount" in df_full.columns:
+            df_full["precomp_boutcount"] = pd.to_numeric(df_full["precomp_boutcount"], errors="coerce")
+        if "opp_precomp_boutcount" in df_full.columns:
+            df_full["opp_precomp_boutcount"] = pd.to_numeric(df_full["opp_precomp_boutcount"], errors="coerce")
     
     print("\n" + "="*60)
     print("ELO RATINGS - Basic System")
@@ -173,7 +189,17 @@ Examples:
     print(f"Parameters: K={args.k:.4f}, Denominator={args.denominator:.4f}")
     print("="*60)
     
-    df_basic = run_basic_elo(df.copy(), k=args.k, denominator=args.denominator)
+    # Run Elo calculation
+    df_basic_full = run_basic_elo(df_full.copy(), k=args.k, denominator=args.denominator)
+    
+    # If using tail without --tail-only, filter to display only tail fights
+    if args.tail_fights and not args.tail_only:
+        df_basic = df_basic_full[df_basic_full['in_tail']].copy()
+        print(f"\nShowing results for last {args.tail_fights} fights")
+        print(f"(Elo ratings calculated from full {len(df_basic_full)} fight history)")
+    else:
+        df_basic = df_basic_full
+    
     display_top_n_elos(df_basic, n=10)
     most_recent_elo(df_basic, n=10)
     
@@ -212,8 +238,8 @@ Examples:
     print("="*60)
     # Note: MOV Elo uses pre-optimized fixed parameters from full_genetic_with_k_denom_mov.py
     # These are separate from the basic Elo parameters and are kept fixed for consistency
-    df_mov = run_basic_elo_with_mov(
-        df.copy(),
+    df_mov_full = run_basic_elo_with_mov(
+        df_full.copy(),
         k=135.5024295855922,
         w_ko=1.304905948911245,
         w_sub=2.0,
@@ -221,6 +247,13 @@ Examples:
         w_sdec=0.6277860597403592,
         w_mdec=1.0229206801627735
     )
+    
+    # Filter to tail if specified (and not using tail-only mode)
+    if args.tail_fights and not args.tail_only:
+        df_mov = df_mov_full[df_mov_full['in_tail']].copy()
+    else:
+        df_mov = df_mov_full
+    
     display_top_n_elos(df_mov, n=10)
     most_recent_elo(df_mov, n=10)
     

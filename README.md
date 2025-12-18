@@ -84,23 +84,36 @@ After running GA optimization, you can test the optimized parameters in main.py:
 # Test with custom K and denominator
 python main.py --k 10.0 --denominator 437.78
 
-# Calculate ROI with optimized parameters (matches GA setup)
+# Calculate ROI with optimized parameters using full fighter history (RECOMMENDED)
 python main.py --k 10.0 --denominator 437.78 --show-roi --use-ga-setup --tail-fights 3000
+
+# Match exact GA optimization behavior (calculate Elo only on tail fights)
+python main.py --k 10.0 --denominator 437.78 --show-roi --use-ga-setup --tail-fights 3000 --tail-only
 
 # Adjust betting confidence threshold
 python main.py --k 10.0 --denominator 437.78 --show-roi --confidence-threshold 30
 ```
+
+**Important:** By default, `--tail-fights` now uses full fighter history for Elo calculations:
+- **Without `--tail-only`** (NEW DEFAULT): Elo ratings are calculated from ALL historical fights, even when evaluating only recent fights. This provides more accurate ratings that reflect each fighter's complete career.
+- **With `--tail-only`**: Elo ratings are calculated ONLY from the tail fights, matching the original GA optimization behavior. Use this for exact reproducibility of GA results.
 
 The `--use-ga-setup` flag ensures the ROI calculation matches the GA optimization by:
 - Adding bout count tracking
 - Filtering out fights where either fighter has no prior history
 - Using the same validation split (last 20% of data)
 
-**Example:** If GA optimization finds K=10.0, denominator=437.78 with 34.92% ROI, running:
+**Example - Reproducing GA Results:** If GA optimization finds K=10.0, denominator=437.78 with 34.92% ROI, running:
+```bash
+python main.py --k 10.0 --denominator 437.7802 --show-roi --use-ga-setup --tail-fights 3000 --tail-only
+```
+Will produce the same 34.92% ROI, confirming the optimization results.
+
+**Example - Realistic Evaluation:** To see how those parameters perform with full fighter history:
 ```bash
 python main.py --k 10.0 --denominator 437.7802 --show-roi --use-ga-setup --tail-fights 3000
 ```
-Will produce the same 34.92% ROI, confirming the optimization results.
+This provides a more realistic assessment by using complete fighter career data for Elo calculations.
 
 ### 2. Running the Genetic Algorithm (GA) Optimization
 
