@@ -12,10 +12,17 @@ Usage:
 
 Optimization Modes:
     - accuracy: Optimize for prediction accuracy (higher is better, 0-1)
-    - roi: Optimize for return on investment (higher is better, -1 to 1)
+    - roi: Optimize for return on investment (displayed as percentage, -100% to 100%)
     - log_loss: Optimize for logarithmic loss (lower raw values are better,
                 but displayed as higher fitness for GA)
     - composite: Optimize for weighted combination of all metrics
+
+Output:
+    The script saves two files after optimization:
+    - ga_optimization_{mode}_{timestamp}.json: Complete results including best parameters,
+                                                fitness scores, and generation history
+    - ga_optimization_{mode}_{timestamp}_history.csv: Generation-by-generation history
+                                                       for plotting and analysis
 """
 
 import sys
@@ -25,6 +32,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 import numpy as np
 import pandas as pd
+import json
+from datetime import datetime
 from optimization.ga_engine import GeneticAlgorithm, create_elo_fitness_function
 from optimization.optimal_k_with_mov import add_bout_counts
 
@@ -101,16 +110,24 @@ def example_basic_optimization(optimize_for="accuracy"):
     print(f"Best K-factor: {best_individual.genes['k']:.2f}")
     print(f"Best denominator: {best_individual.genes['denominator']:.2f}")
     
-    # Display the appropriate metric based on optimization target
+    # Calculate mode-specific metrics once
+    log_loss_value = None
+    roi_percent = None
+    
     if optimize_for == "log_loss":
-        # Convert fitness back to log_loss for display
         fitness_clamped = max(best_individual.fitness, 1e-15)
         log_loss_value = -np.log(fitness_clamped)
+    elif optimize_for == "roi":
+        roi_percent = best_individual.fitness * 100
+    
+    # Display the appropriate metric based on optimization target
+    if optimize_for == "log_loss":
         print(f"Best log loss: {log_loss_value:.4f}")
+    elif optimize_for == "roi":
+        print(f"Best ROI: {roi_percent:.2f}% (fitness: {best_individual.fitness:.4f})")
     else:
         metric_names = {
             "accuracy": "accuracy",
-            "roi": "ROI",
             "composite": "composite fitness"
         }
         metric_name = metric_names.get(optimize_for, "fitness")
@@ -123,6 +140,50 @@ def example_basic_optimization(optimize_for="accuracy"):
         print("        1.0 = perfect predictions (log_loss=0)")
         print("        ~0.5 = random guessing (log_loss=0.693)")
         print("        <0.5 = worse than random")
+    elif optimize_for == "roi":
+        print("\nNote: ROI is displayed as a percentage of return on investment.")
+        print("      For example, 34.92% means $1 bet returns $1.3492 on average.")
+    
+    # Save results to file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = f"ga_optimization_{optimize_for}_{timestamp}.json"
+    history_file = f"ga_optimization_{optimize_for}_{timestamp}_history.csv"
+    
+    # Prepare results dictionary
+    results = {
+        "timestamp": timestamp,
+        "optimization_mode": optimize_for,
+        "best_parameters": best_individual.genes,
+        "best_fitness": best_individual.fitness,
+        "generations": len(ga.history),
+        "population_size": ga.population_size,
+        "elite_size": ga.elite_size,
+        "mutation_rate": ga.mutation_rate,
+        "crossover_rate": ga.crossover_rate,
+        "history": ga.history
+    }
+    
+    # Add mode-specific metrics
+    if log_loss_value is not None:
+        results["best_log_loss"] = log_loss_value
+    if roi_percent is not None:
+        results["best_roi_percent"] = roi_percent
+    
+    # Save results with error handling
+    try:
+        with open(output_file, 'w') as f:
+            json.dump(results, f, indent=2)
+        print(f"\nResults saved to: {output_file}")
+    except (IOError, OSError) as e:
+        print(f"\nWarning: Could not save results to {output_file}: {e}")
+    
+    # Save history as CSV for easy plotting
+    try:
+        history_df = ga.get_history_dataframe()
+        history_df.to_csv(history_file, index=False)
+        print(f"History saved to: {history_file}")
+    except (IOError, OSError) as e:
+        print(f"Warning: Could not save history to {history_file}: {e}")
     
     return best_individual, ga
 

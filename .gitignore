@@ -39,3 +39,7 @@ config_test_report_*.txt
 
 # Generated results directory (parameter exports)
 results/
+
+# GA optimization output files
+ga_optimization_*.json
+ga_optimization_*.csv
