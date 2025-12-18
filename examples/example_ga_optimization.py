@@ -12,10 +12,17 @@ Usage:
 
 Optimization Modes:
     - accuracy: Optimize for prediction accuracy (higher is better, 0-1)
-    - roi: Optimize for return on investment (higher is better, -1 to 1)
+    - roi: Optimize for return on investment (displayed as percentage, -100% to 100%)
     - log_loss: Optimize for logarithmic loss (lower raw values are better,
                 but displayed as higher fitness for GA)
     - composite: Optimize for weighted combination of all metrics
+
+Output:
+    The script saves two files after optimization:
+    - ga_optimization_{mode}_{timestamp}.json: Complete results including best parameters,
+                                                fitness scores, and generation history
+    - ga_optimization_{mode}_{timestamp}_history.csv: Generation-by-generation history
+                                                       for plotting and analysis
 """
 
 import sys

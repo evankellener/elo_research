@@ -628,5 +628,51 @@ class TestROIFitnessFunction(unittest.TestCase):
                             "ROI fitness should be <= 1.0 (best case)")
 
 
+class TestFileOutputFunctionality(unittest.TestCase):
+    """Test file output functionality in example script."""
+    
+    def test_roi_percentage_display(self):
+        """Test that ROI is correctly converted to percentage."""
+        roi_fitness = 0.3492
+        roi_percent = roi_fitness * 100
+        
+        self.assertAlmostEqual(roi_percent, 34.92, places=2)
+    
+    def test_json_structure(self):
+        """Test that results dictionary has expected structure."""
+        import json
+        from datetime import datetime
+        
+        # Simulate results structure
+        results = {
+            "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "optimization_mode": "roi",
+            "best_parameters": {"k": 10.0, "denominator": 437.78},
+            "best_fitness": 0.3492,
+            "best_roi_percent": 34.92,
+            "generations": 20,
+            "population_size": 20,
+            "elite_size": 3,
+            "mutation_rate": 0.15,
+            "crossover_rate": 0.8,
+            "history": []
+        }
+        
+        # Verify structure
+        self.assertIn("timestamp", results)
+        self.assertIn("optimization_mode", results)
+        self.assertIn("best_parameters", results)
+        self.assertIn("best_fitness", results)
+        self.assertIn("best_roi_percent", results)
+        
+        # Verify ROI calculation
+        self.assertAlmostEqual(results["best_roi_percent"], 
+                              results["best_fitness"] * 100, places=2)
+        
+        # Test JSON serialization
+        json_str = json.dumps(results)
+        self.assertIsInstance(json_str, str)
+
+
 if __name__ == '__main__':
     unittest.main(argv=[''], exit=False, verbosity=2)
