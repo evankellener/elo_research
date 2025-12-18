@@ -495,8 +495,9 @@ def create_elo_fitness_function(
             total_profit = 0
             total_bets = 0
             for pred, actual in zip(predictions, actuals):
-                elo_diff = abs(predictions[0] - 0.5) * 2  # Rough confidence
-                if elo_diff * 1000 >= confidence_threshold:  # Only bet if confident
+                # Use prediction confidence (distance from 0.5) to determine if we should bet
+                confidence = abs(pred - 0.5) * 2  # Scale to 0-1 range
+                if confidence * 1000 >= confidence_threshold:  # Only bet if confident
                     pred_winner = 1 if pred > 0.5 else 0
                     if pred_winner == actual:
                         total_profit += 1
