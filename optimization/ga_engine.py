@@ -319,7 +319,10 @@ class GeneticAlgorithm:
         """
         if self.optimization_mode == "log_loss":
             # Convert fitness back to log_loss: log_loss = -ln(fitness)
-            # Clamp fitness to avoid log(0)
+            # Clamp fitness to prevent log(0) which would be undefined.
+            # Using 1e-15 as minimum allows displaying log_loss up to ~34.5,
+            # which is well beyond any practical prediction scenario
+            # (perfect predictions have log_loss=0, random guessing≈0.693)
             fitness_clamped = max(fitness, 1e-15)
             log_loss_value = -np.log(fitness_clamped)
             return ("Log Loss", log_loss_value)
@@ -366,15 +369,9 @@ class GeneticAlgorithm:
                 _, avg_display = self._format_metric_for_display(avg_fitness)
                 _, worst_display = self._format_metric_for_display(worst_fitness)
                 
-                # For log_loss, swap best and worst labels since lower is better
-                if self.optimization_mode == "log_loss":
-                    print(f"Generation {gen + 1}/{generations}: "
-                          f"Best={best_display:.6f}, Avg={avg_display:.6f}, "
-                          f"Worst={worst_display:.6f}")
-                else:
-                    print(f"Generation {gen + 1}/{generations}: "
-                          f"Best={best_display:.6f}, Avg={avg_display:.6f}, "
-                          f"Worst={worst_display:.6f}")
+                print(f"Generation {gen + 1}/{generations}: "
+                      f"Best={best_display:.6f}, Avg={avg_display:.6f}, "
+                      f"Worst={worst_display:.6f}")
             
             # Early stopping check
             if early_stop_generations and len(best_fitness_history) > 0:
