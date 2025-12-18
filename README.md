@@ -59,6 +59,8 @@ Ensure you have the required data file in the `data/` directory:
 
 ## Quick Start
 
+> **Note:** All commands below should be run from the repository root directory (`elo_research/`)
+
 ### 1. Basic Elo Analysis
 
 Run the main Elo analysis and visualizations:
@@ -92,7 +94,7 @@ python examples/example_ga_optimization.py
 - Shows fitness improvement over generations
 - Takes ~5 minutes to complete
 
-**Example output:**
+**Example output (actual values will vary):**
 ```
 ======================================================================
 GENETIC ALGORITHM OPTIMIZATION EXAMPLE
@@ -113,6 +115,8 @@ Best K-factor: 72.45
 Best denominator: 436.78
 Best accuracy: 0.6034
 ```
+
+**Note:** The exact parameter values and fitness scores will vary between runs due to the stochastic nature of genetic algorithms.
 
 **Try different optimization modes:**
 ```bash
