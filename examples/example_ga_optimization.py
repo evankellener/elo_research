@@ -110,15 +110,20 @@ def example_basic_optimization(optimize_for="accuracy"):
     print(f"Best K-factor: {best_individual.genes['k']:.2f}")
     print(f"Best denominator: {best_individual.genes['denominator']:.2f}")
     
-    # Display the appropriate metric based on optimization target
+    # Calculate mode-specific metrics once
+    log_loss_value = None
+    roi_percent = None
+    
     if optimize_for == "log_loss":
-        # Convert fitness back to log_loss for display
         fitness_clamped = max(best_individual.fitness, 1e-15)
         log_loss_value = -np.log(fitness_clamped)
+    elif optimize_for == "roi":
+        roi_percent = best_individual.fitness * 100
+    
+    # Display the appropriate metric based on optimization target
+    if optimize_for == "log_loss":
         print(f"Best log loss: {log_loss_value:.4f}")
     elif optimize_for == "roi":
-        # Display ROI as percentage for clarity
-        roi_percent = best_individual.fitness * 100
         print(f"Best ROI: {roi_percent:.2f}% (fitness: {best_individual.fitness:.4f})")
     else:
         metric_names = {
@@ -158,12 +163,10 @@ def example_basic_optimization(optimize_for="accuracy"):
     }
     
     # Add mode-specific metrics
-    if optimize_for == "log_loss":
-        fitness_clamped = max(best_individual.fitness, 1e-15)
-        log_loss_value = -np.log(fitness_clamped)
+    if log_loss_value is not None:
         results["best_log_loss"] = log_loss_value
-    elif optimize_for == "roi":
-        results["best_roi_percent"] = best_individual.fitness * 100
+    if roi_percent is not None:
+        results["best_roi_percent"] = roi_percent
     
     with open(output_file, 'w') as f:
         json.dump(results, f, indent=2)
