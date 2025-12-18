@@ -533,8 +533,8 @@ def create_elo_fitness_function(
             fitness = np.mean(pred_labels == actuals)
         
         elif optimize_for == "roi":
-            # Simple ROI calculation
-            total_profit = 0
+            # Realistic ROI calculation with implied odds based on prediction probabilities
+            total_profit = 0.0
             total_bets = 0
             for pred, actual in zip(predictions, actuals):
                 # Use prediction confidence (distance from 0.5) to determine if we should bet
@@ -542,11 +542,24 @@ def create_elo_fitness_function(
                 # Scale by 1000 to match typical Elo difference magnitude for threshold comparison
                 # e.g., confidence_threshold=50 means bet when confidence > 0.05 (5%)
                 if confidence * 1000 >= confidence_threshold:
+                    # Determine predicted winner and their win probability
                     pred_winner = 1 if pred > 0.5 else 0
+                    pred_prob = pred if pred > 0.5 else (1 - pred)
+                    
+                    # Calculate realistic payout based on implied odds
+                    # If pred_prob = 0.7 (70% favorite): payout = 1/0.7 - 1 ≈ 0.43 (bet $1 to win $0.43)
+                    # If pred_prob = 0.3 (30% underdog): payout = 1/0.3 - 1 ≈ 2.33 (bet $1 to win $2.33)
+                    # Clamp probability to avoid division by very small numbers
+                    pred_prob_clamped = max(pred_prob, 0.01)  # Minimum 1% probability (max 99:1 odds)
+                    payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
+                    
+                    # We always bet 1 unit
                     if pred_winner == actual:
-                        total_profit += 1
+                        # Win: get back bet + payout
+                        total_profit += payout_multiplier
                     else:
-                        total_profit -= 1
+                        # Lose: lose the bet
+                        total_profit -= 1.0
                     total_bets += 1
             
             # If no bets were made, return worst possible ROI (-1.0)
@@ -603,11 +616,19 @@ def create_elo_fitness_function(
             
             for i, (pred, actual, elo_diff_val) in enumerate(zip(predictions, actuals, elo_diffs)):
                 if elo_diff_val >= confidence_threshold:
+                    # Determine predicted winner and their win probability
                     pred_winner = 1 if pred > 0.5 else 0
+                    pred_prob = pred if pred > 0.5 else (1 - pred)
+                    
+                    # Calculate realistic payout based on implied odds
+                    # Clamp probability to avoid division by very small numbers
+                    pred_prob_clamped = max(pred_prob, 0.01)
+                    payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
+                    
                     if pred_winner == actual:
-                        total_profit += 1
+                        total_profit += payout_multiplier
                     else:
-                        total_profit -= 1
+                        total_profit -= 1.0
                     total_bets += 1
             
             # If no bets were made, return worst possible ROI (-1.0)
