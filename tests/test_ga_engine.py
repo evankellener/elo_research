@@ -375,5 +375,79 @@ class TestGAWithConstraints(unittest.TestCase):
         self.assertLess(abs(best.genes['y'] + 3), 1.0)
 
 
+class TestOptimizationModeDisplay(unittest.TestCase):
+    """Test display formatting for different optimization modes."""
+    
+    def test_log_loss_mode_display(self):
+        """Test that log_loss mode displays actual log_loss values."""
+        def fitness_fn(genes):
+            # Return a fitness value in the range used by log_loss (exp(-log_loss))
+            # Simulate log_loss ≈ 0.7 -> fitness ≈ 0.497
+            return 0.5
+        
+        param_bounds = {'x': (0, 10)}
+        
+        ga = GeneticAlgorithm(
+            param_bounds=param_bounds,
+            fitness_fn=fitness_fn,
+            population_size=10,
+            random_seed=42,
+            verbose=False,
+            optimization_mode="log_loss"
+        )
+        
+        # Test the formatting function
+        metric_name, display_value = ga._format_metric_for_display(0.5)
+        
+        self.assertEqual(metric_name, "Log Loss")
+        # fitness = 0.5 corresponds to log_loss = -ln(0.5) ≈ 0.693
+        self.assertAlmostEqual(display_value, 0.693, places=2)
+    
+    def test_default_mode_display(self):
+        """Test that default mode displays fitness values."""
+        def fitness_fn(genes):
+            return 0.5
+        
+        param_bounds = {'x': (0, 10)}
+        
+        ga = GeneticAlgorithm(
+            param_bounds=param_bounds,
+            fitness_fn=fitness_fn,
+            population_size=10,
+            random_seed=42,
+            verbose=False
+        )
+        
+        # Test the formatting function
+        metric_name, display_value = ga._format_metric_for_display(0.5)
+        
+        self.assertEqual(metric_name, "Fitness")
+        self.assertEqual(display_value, 0.5)
+    
+    def test_log_loss_optimization_direction(self):
+        """Test that log_loss displays show improvement correctly."""
+        # Better model has higher fitness (lower log_loss)
+        better_fitness = 0.6  # log_loss ≈ 0.511
+        worse_fitness = 0.5   # log_loss ≈ 0.693
+        
+        param_bounds = {'x': (0, 10)}
+        fitness_fn = lambda genes: better_fitness
+        
+        ga = GeneticAlgorithm(
+            param_bounds=param_bounds,
+            fitness_fn=fitness_fn,
+            population_size=10,
+            random_seed=42,
+            verbose=False,
+            optimization_mode="log_loss"
+        )
+        
+        _, better_display = ga._format_metric_for_display(better_fitness)
+        _, worse_display = ga._format_metric_for_display(worse_fitness)
+        
+        # Better model should have LOWER displayed log_loss
+        self.assertLess(better_display, worse_display)
+
+
 if __name__ == '__main__':
     unittest.main(argv=[''], exit=False, verbosity=2)

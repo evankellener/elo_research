@@ -88,7 +88,8 @@ def example_basic_optimization(optimize_for="accuracy"):
         selection_method="tournament",
         crossover_method="uniform",
         random_seed=42,
-        verbose=True
+        verbose=True,
+        optimization_mode=optimize_for
     )
     
     best_individual = ga.run(generations=20, early_stop_generations=10)
