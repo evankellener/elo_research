@@ -76,6 +76,32 @@ This will:
 - Show current top rankings
 - Optionally graph fighter history
 
+#### Testing Optimized Parameters
+
+After running GA optimization, you can test the optimized parameters in main.py:
+
+```bash
+# Test with custom K and denominator
+python main.py --k 10.0 --denominator 437.78
+
+# Calculate ROI with optimized parameters (matches GA setup)
+python main.py --k 10.0 --denominator 437.78 --show-roi --use-ga-setup --tail-fights 3000
+
+# Adjust betting confidence threshold
+python main.py --k 10.0 --denominator 437.78 --show-roi --confidence-threshold 30
+```
+
+The `--use-ga-setup` flag ensures the ROI calculation matches the GA optimization by:
+- Adding bout count tracking
+- Filtering out fights where either fighter has no prior history
+- Using the same validation split (last 20% of data)
+
+**Example:** If GA optimization finds K=10.0, denominator=437.78 with 34.92% ROI, running:
+```bash
+python main.py --k 10.0 --denominator 437.7802 --show-roi --use-ga-setup --tail-fights 3000
+```
+Will produce the same 34.92% ROI, confirming the optimization results.
+
 ### 2. Running the Genetic Algorithm (GA) Optimization
 
 The GA optimization helps you find the best parameters for your Elo rating system. Here are three ways to run it, from simplest to most advanced:
