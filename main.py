@@ -6,7 +6,14 @@ from elo.visualization import display_top_n_elos, most_recent_elo, graph_fighter
 from elo.elo_utils import add_bout_counts
 
 # Minimum probability for betting odds calculation (prevents extreme payouts)
+# 0.01 = 1% probability = 99:1 maximum odds
 MIN_BET_PROBABILITY = 0.01
+
+# Confidence scaling factor to convert probability confidence (0-1) to Elo points
+# An Elo difference of 100 points translates to roughly 14% confidence
+# This scaling (1000) allows confidence_threshold in Elo-equivalent units
+# e.g., confidence_threshold=50 means bet when confidence > 5% (50/1000)
+CONFIDENCE_SCALE_FACTOR = 1000
 
 def calculate_roi(df, denominator=400, confidence_threshold=50, validation_percentile=0.8, use_bout_filter=False):
     """
@@ -64,23 +71,23 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
             'accuracy': 0.0
         }
     
-    predictions = np.array(predictions)
-    actuals = np.array(actuals)
-    
-    # Calculate ROI
+    # Calculate ROI by simulating betting strategy
     total_profit = 0.0
     total_bets = 0
     
     for pred, actual in zip(predictions, actuals):
         # Use prediction confidence to determine if we should bet
-        confidence = abs(pred - 0.5) * 2  # Scale to 0-1 range
-        # Scale by 1000 to match typical Elo difference magnitude
-        if confidence * 1000 >= confidence_threshold:
+        confidence = abs(pred - 0.5) * 2  # Scale to 0-1 range (0 = unsure, 1 = certain)
+        
+        # Check if confidence exceeds threshold (scaled to match Elo-equivalent units)
+        if confidence * CONFIDENCE_SCALE_FACTOR >= confidence_threshold:
             # Determine predicted winner and their win probability
             pred_winner = 1 if pred > 0.5 else 0
             pred_prob = pred if pred > 0.5 else (1 - pred)
             
             # Calculate realistic payout based on implied odds
+            # Formula: payout = (1 / probability) - 1
+            # Example: 70% favorite -> payout = (1/0.7) - 1 = 0.43 (bet $1 to win $0.43)
             pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
             payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
             
@@ -95,9 +102,11 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
     
     roi = (total_profit / total_bets) if total_bets > 0 else -1.0
     
-    # Calculate accuracy
-    pred_labels = (predictions > 0.5).astype(int)
-    accuracy = np.mean(pred_labels == actuals)
+    # Calculate accuracy on all predictions (convert to numpy for vectorization)
+    predictions_arr = np.array(predictions)
+    actuals_arr = np.array(actuals)
+    pred_labels = (predictions_arr > 0.5).astype(int)
+    accuracy = np.mean(pred_labels == actuals_arr)
     
     return {
         'roi': roi,
@@ -106,7 +115,7 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         'total_profit': total_profit,
         'total_wagered': float(total_bets),
         'accuracy': accuracy,
-        'total_predictions': len(predictions)
+        'total_predictions': len(predictions_arr)
     }
 
 def main():
