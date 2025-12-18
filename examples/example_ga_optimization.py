@@ -111,9 +111,11 @@ def example_basic_optimization(optimize_for="accuracy"):
     
     # Add explanatory note for log_loss
     if optimize_for == "log_loss":
-        print("\nNote: Log loss fitness is converted for GA optimization.")
-        print("      Higher fitness values are better (0=worst, 1=perfect).")
-        print("      Raw log loss values: 0=perfect, 0.693=random guess, higher=worse")
+        print("\nNote: Log loss fitness is converted for GA optimization (exp(-log_loss)).")
+        print("      Higher fitness values are better:")
+        print("        1.0 = perfect predictions (log_loss=0)")
+        print("        ~0.5 = random guessing (log_loss=0.693)")
+        print("        <0.5 = worse than random")
     
     return best_individual, ga
 

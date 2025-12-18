@@ -515,9 +515,11 @@ def create_elo_fitness_function(
                 -(actuals * np.log(predictions_clipped) +
                   (1 - actuals) * np.log(1 - predictions_clipped))
             )
-            # Convert to fitness (higher is better): perfect log_loss=0, random=0.693
-            # We use 1.0 - (log_loss / 0.693) so that 0 -> 1.0 and 0.693 -> ~0.0
-            fitness = max(0, 1.0 - log_loss / 0.693)
+            # Convert to fitness (higher is better)
+            # Use exponential decay to map log_loss to fitness in range (0, 1]
+            # Perfect log_loss=0 -> fitness=1.0, random log_loss=0.693 -> fitness~0.5
+            # This allows GA to distinguish between different "bad" models
+            fitness = np.exp(-log_loss)
         
         else:  # composite
             # Accuracy component
@@ -527,13 +529,12 @@ def create_elo_fitness_function(
             # Log Loss component (lower is better, so invert and scale)
             eps = 1e-15
             predictions_clipped = np.clip(predictions, eps, 1 - eps)
-            # Standard log loss (no extra negative sign)
             log_loss = np.mean(
                 -(actuals * np.log(predictions_clipped) +
                   (1 - actuals) * np.log(1 - predictions_clipped))
             )
-            # Scale log loss: perfect = 0, random = 0.693, invert to make higher better
-            log_loss_score = max(0, 1.0 - log_loss / 0.693)
+            # Use exponential mapping: log_loss=0 -> 1.0, log_loss=0.693 -> ~0.5
+            log_loss_score = np.exp(-log_loss)
             
             # Brier Score component (lower is better, so invert)
             brier_score = np.mean((predictions - actuals) ** 2)
