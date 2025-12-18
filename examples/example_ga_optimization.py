@@ -100,15 +100,21 @@ def example_basic_optimization(optimize_for="accuracy"):
     print(f"Best K-factor: {best_individual.genes['k']:.2f}")
     print(f"Best denominator: {best_individual.genes['denominator']:.2f}")
     
-    # Display the appropriate metric name based on optimization target
-    metric_names = {
-        "accuracy": "accuracy",
-        "roi": "ROI",
-        "log_loss": "log loss fitness",
-        "composite": "composite fitness"
-    }
-    metric_name = metric_names.get(optimize_for, "fitness")
-    print(f"Best {metric_name}: {best_individual.fitness:.4f}")
+    # Display the appropriate metric based on optimization target
+    if optimize_for == "log_loss":
+        # Convert fitness back to log_loss for display
+        import numpy as np
+        fitness_clamped = max(best_individual.fitness, 1e-15)
+        log_loss_value = -np.log(fitness_clamped)
+        print(f"Best log loss: {log_loss_value:.4f}")
+    else:
+        metric_names = {
+            "accuracy": "accuracy",
+            "roi": "ROI",
+            "composite": "composite fitness"
+        }
+        metric_name = metric_names.get(optimize_for, "fitness")
+        print(f"Best {metric_name}: {best_individual.fitness:.4f}")
     
     # Add explanatory note for log_loss
     if optimize_for == "log_loss":

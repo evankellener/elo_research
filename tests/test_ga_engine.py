@@ -447,6 +447,24 @@ class TestOptimizationModeDisplay(unittest.TestCase):
         
         # Better model should have LOWER displayed log_loss
         self.assertLess(better_display, worse_display)
+    
+    def test_fitness_to_log_loss_conversion(self):
+        """Test that fitness can be correctly converted back to log_loss."""
+        # Test known fitness values and their corresponding log_loss values
+        test_cases = [
+            (0.5, 0.693147),  # Random guessing: ln(2)
+            (1.0, 0.0),       # Perfect prediction
+            (0.6, 0.510826),  # Better than random
+            (0.4, 0.916291),  # Worse than random
+        ]
+        
+        for fitness, expected_log_loss in test_cases:
+            # Clamp fitness to prevent log(0)
+            fitness_clamped = max(fitness, 1e-15)
+            # Convert: log_loss = -ln(fitness)
+            calculated_log_loss = -np.log(fitness_clamped)
+            self.assertAlmostEqual(calculated_log_loss, expected_log_loss, places=5,
+                                   msg=f"Fitness {fitness} -> Log Loss conversion failed")
 
 
 if __name__ == '__main__':
