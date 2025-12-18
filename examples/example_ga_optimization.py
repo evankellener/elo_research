@@ -25,6 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 import numpy as np
 import pandas as pd
+import json
+from datetime import datetime
 from optimization.ga_engine import GeneticAlgorithm, create_elo_fitness_function
 from optimization.optimal_k_with_mov import add_bout_counts
 
@@ -107,10 +109,13 @@ def example_basic_optimization(optimize_for="accuracy"):
         fitness_clamped = max(best_individual.fitness, 1e-15)
         log_loss_value = -np.log(fitness_clamped)
         print(f"Best log loss: {log_loss_value:.4f}")
+    elif optimize_for == "roi":
+        # Display ROI as percentage for clarity
+        roi_percent = best_individual.fitness * 100
+        print(f"Best ROI: {roi_percent:.2f}% (fitness: {best_individual.fitness:.4f})")
     else:
         metric_names = {
             "accuracy": "accuracy",
-            "roi": "ROI",
             "composite": "composite fitness"
         }
         metric_name = metric_names.get(optimize_for, "fitness")
@@ -123,6 +128,46 @@ def example_basic_optimization(optimize_for="accuracy"):
         print("        1.0 = perfect predictions (log_loss=0)")
         print("        ~0.5 = random guessing (log_loss=0.693)")
         print("        <0.5 = worse than random")
+    elif optimize_for == "roi":
+        print("\nNote: ROI is displayed as a percentage of return on investment.")
+        print("      For example, 34.92% means $1 bet returns $1.3492 on average.")
+    
+    # Save results to file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = f"ga_optimization_{optimize_for}_{timestamp}.json"
+    
+    # Prepare results dictionary
+    results = {
+        "timestamp": timestamp,
+        "optimization_mode": optimize_for,
+        "best_parameters": best_individual.genes,
+        "best_fitness": best_individual.fitness,
+        "generations": len(ga.history),
+        "population_size": ga.population_size,
+        "elite_size": ga.elite_size,
+        "mutation_rate": ga.mutation_rate,
+        "crossover_rate": ga.crossover_rate,
+        "history": ga.history
+    }
+    
+    # Add mode-specific metrics
+    if optimize_for == "log_loss":
+        fitness_clamped = max(best_individual.fitness, 1e-15)
+        log_loss_value = -np.log(fitness_clamped)
+        results["best_log_loss"] = log_loss_value
+    elif optimize_for == "roi":
+        results["best_roi_percent"] = best_individual.fitness * 100
+    
+    with open(output_file, 'w') as f:
+        json.dump(results, f, indent=2)
+    
+    print(f"\nResults saved to: {output_file}")
+    
+    # Also save history as CSV for easy plotting
+    history_file = f"ga_optimization_{optimize_for}_{timestamp}_history.csv"
+    history_df = ga.get_history_dataframe()
+    history_df.to_csv(history_file, index=False)
+    print(f"History saved to: {history_file}")
     
     return best_individual, ga
 
