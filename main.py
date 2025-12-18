@@ -54,6 +54,8 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         actuals.append(int(row["result"]))
     
     if len(predictions) == 0:
+        # Return worst possible ROI when no valid predictions
+        # -100% means complete loss of all wagered money
         return {
             'roi': -1.0,
             'roi_percent': -100.0,
@@ -208,6 +210,8 @@ Examples:
     print("\n" + "="*60)
     print("ELO RATINGS - With Method of Victory")
     print("="*60)
+    # Note: MOV Elo uses pre-optimized fixed parameters from full_genetic_with_k_denom_mov.py
+    # These are separate from the basic Elo parameters and are kept fixed for consistency
     df_mov = run_basic_elo_with_mov(
         df.copy(),
         k=135.5024295855922,
