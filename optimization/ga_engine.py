@@ -514,7 +514,14 @@ def create_elo_fitness_function(
             actuals.append(int(row["result"]))
         
         if len(predictions) == 0:
-            return 0.0
+            # No valid predictions means the parameters are invalid
+            # Return worst possible fitness
+            if optimize_for == "roi":
+                return -1.0  # Worst possible ROI
+            elif optimize_for == "log_loss":
+                return 1e-15  # Near-zero fitness (very high log loss)
+            else:  # accuracy or composite
+                return 0.0  # Worst accuracy
         
         predictions = np.array(predictions)
         actuals = np.array(actuals)
@@ -542,7 +549,10 @@ def create_elo_fitness_function(
                         total_profit -= 1
                     total_bets += 1
             
-            roi = (total_profit / total_bets) if total_bets > 0 else 0.0
+            # If no bets were made, return worst possible ROI (-1.0)
+            # This ensures models that make no predictions are penalized
+            # rather than appearing as "break-even" (0.0)
+            roi = (total_profit / total_bets) if total_bets > 0 else -1.0
             fitness = roi
         
         elif optimize_for == "log_loss":
@@ -600,7 +610,9 @@ def create_elo_fitness_function(
                         total_profit -= 1
                     total_bets += 1
             
-            roi = (total_profit / total_bets) if total_bets > 0 else 0.0
+            # If no bets were made, return worst possible ROI (-1.0)
+            # This ensures models that make no predictions are penalized
+            roi = (total_profit / total_bets) if total_bets > 0 else -1.0
             # Scale ROI: -1.0 to 1.0 -> 0.0 to 1.0
             roi_score = (roi + 1.0) / 2.0
             
