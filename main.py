@@ -11,12 +11,6 @@ from elo.elo_utils import add_bout_counts
 # 0.01 = 1% probability = 99:1 maximum odds
 MIN_BET_PROBABILITY = 0.01
 
-# Confidence scaling factor to convert probability confidence (0-1) to Elo points
-# An Elo difference of 100 points translates to roughly 14% confidence
-# This scaling (1000) allows confidence_threshold in Elo-equivalent units
-# e.g., confidence_threshold=50 means bet when confidence > 5% (50/1000)
-CONFIDENCE_SCALE_FACTOR = 1000
-
 def calculate_roi(df, denominator=400, confidence_threshold=50, validation_percentile=0.8, use_bout_filter=False):
     """
     Calculate ROI for the Elo predictions using the same method as GA optimization.
@@ -70,8 +64,9 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         predictions.append(pred_prob)
         actuals.append(int(row["result"]))
         
-        # Use prediction confidence to determine if we should bet
-        confidence = abs(pred_prob - 0.5) * 2  # Scale to 0-1 range (0 = unsure, 1 = certain)
+        # Calculate confidence for display purposes only (0 = unsure, 1 = certain)
+        # Confidence is stored in fight info for display but no longer affects betting
+        confidence = abs(pred_prob - 0.5) * 2  # Scale to 0-1 range
         
         # Place bet on every valid fight (regardless of confidence threshold)
         # Determine predicted winner and their win probability
