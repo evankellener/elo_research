@@ -46,7 +46,8 @@ def test_out_of_sample_metrics(
     base_elo=1500,
     confidence_threshold=50,
     optimize_for="accuracy",
-    verbose=True
+    verbose=True,
+    include_calibration=False
 ):
     """
     Test on out-of-sample data (past3_events.csv) and compute metrics.
@@ -60,9 +61,10 @@ def test_out_of_sample_metrics(
                             Kept for backward compatibility.
         optimize_for: Metric to optimize for ("accuracy", "roi", "log_loss")
         verbose: Whether to print verbose output
+        include_calibration: If True, compute and display calibration metrics
         
     Returns:
-        Dictionary with metrics: accuracy, roi, log_loss
+        Dictionary with metrics: accuracy, roi, log_loss, and optionally calibration metrics
     """
     # Get final ratings from training data
     rating_lookup = latest_ratings_from_trained_df(df_trained_with_elo, base_elo=base_elo)
@@ -144,6 +146,59 @@ def test_out_of_sample_metrics(
           (1 - actuals) * np.log(1 - predictions_clipped))
     )
     
+    # Calculate calibration metrics if requested
+    ece = None
+    brier_score = None
+    sharpe_ratio = None
+    
+    if include_calibration:
+        # Calculate Brier Score
+        brier_score = np.mean((predictions - actuals) ** 2)
+        
+        # Calculate ECE
+        n_bins = 10
+        bin_boundaries = np.linspace(0, 1, n_bins + 1)
+        ece = 0.0
+        total_samples = len(predictions)
+        
+        for i in range(n_bins):
+            bin_lower = bin_boundaries[i]
+            bin_upper = bin_boundaries[i + 1]
+            
+            if i == n_bins - 1:
+                mask = (predictions >= bin_lower) & (predictions <= bin_upper)
+            else:
+                mask = (predictions >= bin_lower) & (predictions < bin_upper)
+            
+            bin_preds = predictions[mask]
+            bin_actuals = actuals[mask]
+            
+            if len(bin_preds) > 0:
+                avg_pred = np.mean(bin_preds)
+                actual_rate = np.mean(bin_actuals)
+                bin_error = abs(avg_pred - actual_rate)
+                ece += bin_error * len(bin_preds) / total_samples
+        
+        # Calculate Sharpe Ratio from betting returns
+        profits = []
+        for pred, actual in zip(predictions, actuals):
+            pred_winner = 1 if pred > 0.5 else 0
+            pred_prob = pred if pred > 0.5 else (1 - pred)
+            pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
+            payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
+            
+            if pred_winner == actual:
+                profit = payout_multiplier
+            else:
+                profit = -1.0
+            profits.append(profit)
+        
+        profits = np.array(profits)
+        if len(profits) > 1 and np.std(profits) > 0:
+            sharpe_ratio = np.mean(profits) / np.std(profits)
+        else:
+            sharpe_ratio = 0.0
+    
     if verbose:
         print(f"\n{'='*70}")
         print("OUT-OF-SAMPLE TESTING (past3_events.csv)")
@@ -152,30 +207,44 @@ def test_out_of_sample_metrics(
         print(f"OOS Accuracy: {accuracy:.4f}")
         print(f"OOS ROI: {roi:.4f} ({roi * 100:.2f}%)")
         print(f"OOS Log Loss: {log_loss:.4f}")
+        if include_calibration:
+            print(f"OOS Brier Score: {brier_score:.4f}")
+            print(f"OOS ECE: {ece:.4f}")
+            print(f"OOS Sharpe Ratio: {sharpe_ratio:.4f}")
         if total_bets > 0:
             print(f"Number of bets placed: {total_bets}")
         print(f"{'='*70}")
     
-    return {
+    result = {
         'accuracy': accuracy,
         'roi': roi,
         'log_loss': log_loss,
         'n_predictions': len(predictions),
         'n_bets': total_bets
     }
+    
+    if include_calibration:
+        result['brier_score'] = brier_score
+        result['ece'] = ece
+        result['sharpe_ratio'] = sharpe_ratio
+    
+    return result
 
 
-def example_basic_optimization(optimize_for="accuracy"):
+def example_basic_optimization(optimize_for="accuracy", include_calibration=False):
     """
     Basic GA optimization of K-factor and denominator.
     
     Args:
         optimize_for: Optimization target - "accuracy", "roi", "log_loss", or "composite"
+        include_calibration: If True, includes calibration metrics (ECE, Brier, Sharpe) in fitness
     """
     print("="*70)
     print("EXAMPLE: BASIC GA OPTIMIZATION (K-factor + Denominator)")
     print("="*70)
     print(f"\nOptimization mode: {optimize_for}")
+    if include_calibration:
+        print("Calibration metrics: ENABLED (ECE, Brier Score, Sharpe Ratio)")
     
     # Load data
     print("\nLoading data...")
@@ -211,7 +280,8 @@ def example_basic_optimization(optimize_for="accuracy"):
         base_elo=1500,
         use_validation_split=True,
         validation_percentile=0.8,
-        optimize_for=optimize_for
+        optimize_for=optimize_for,
+        include_calibration=include_calibration
     )
     
     # Create and run GA
@@ -251,7 +321,8 @@ def example_basic_optimization(optimize_for="accuracy"):
         base_elo=1500,
         confidence_threshold=best_individual.genes.get('confidence_threshold', 50),
         optimize_for=optimize_for,
-        verbose=True
+        verbose=True,
+        include_calibration=include_calibration
     )
     
     print("\n" + "="*70)
@@ -379,6 +450,11 @@ Optimization Modes:
         choices=["accuracy", "roi", "log_loss", "composite"],
         help="Optimization target (default: accuracy)"
     )
+    parser.add_argument(
+        "--include-calibration",
+        action="store_true",
+        help="Include calibration metrics (ECE, Brier Score, Sharpe Ratio) in fitness function"
+    )
     
     args = parser.parse_args()
     
@@ -393,7 +469,10 @@ Optimization Modes:
         sys.exit(1)
     
     # Run example
-    best, ga = example_basic_optimization(optimize_for=args.optimize_for)
+    best, ga = example_basic_optimization(
+        optimize_for=args.optimize_for,
+        include_calibration=args.include_calibration
+    )
     
     print("\n" + "="*70)
     print("EXAMPLE COMPLETE")

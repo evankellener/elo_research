@@ -423,7 +423,8 @@ def create_elo_fitness_function(
     use_validation_split: bool = True,
     validation_percentile: float = 0.8,
     optimize_for: str = "accuracy",
-    fitness_weights: Optional[Dict[str, float]] = None
+    fitness_weights: Optional[Dict[str, float]] = None,
+    include_calibration: bool = False
 ) -> Callable[[Dict[str, float]], float]:
     """
     Create a fitness function for Elo parameter optimization.
@@ -445,6 +446,7 @@ def create_elo_fitness_function(
         fitness_weights: Optional dict for composite fitness. Keys: 
             'accuracy', 'log_loss', 'brier_score', 'roi'
             Default: {'accuracy': 0.3, 'log_loss': 0.2, 'brier_score': 0.2, 'roi': 0.3}
+        include_calibration: If True, includes calibration metrics (ECE, Brier, Sharpe) in fitness
         
     Returns:
         Fitness function that takes parameter dict and returns fitness score
@@ -535,11 +537,82 @@ def create_elo_fitness_function(
         predictions = np.array(predictions)
         actuals = np.array(actuals)
         
+        # If include_calibration is True, compute calibration metrics
+        calibration_bonus = 0.0
+        if include_calibration:
+            # Calculate ECE (Expected Calibration Error) - lower is better
+            eps = 1e-15
+            predictions_clipped = np.clip(predictions, eps, 1 - eps)
+            
+            # Brier Score (lower is better, range 0-1)
+            brier_score = np.mean((predictions - actuals) ** 2)
+            # Convert to score: 0 = perfect, 0.25 = random -> scale to 0-1 (higher is better)
+            brier_score_normalized = max(0, 1.0 - brier_score / 0.25)
+            
+            # ECE calculation
+            n_bins = 10
+            bin_boundaries = np.linspace(0, 1, n_bins + 1)
+            ece = 0.0
+            total_samples = len(predictions)
+            
+            for i in range(n_bins):
+                bin_lower = bin_boundaries[i]
+                bin_upper = bin_boundaries[i + 1]
+                
+                if i == n_bins - 1:
+                    mask = (predictions >= bin_lower) & (predictions <= bin_upper)
+                else:
+                    mask = (predictions >= bin_lower) & (predictions < bin_upper)
+                
+                bin_preds = predictions[mask]
+                bin_actuals = actuals[mask]
+                
+                if len(bin_preds) > 0:
+                    avg_pred = np.mean(bin_preds)
+                    actual_rate = np.mean(bin_actuals)
+                    bin_error = abs(avg_pred - actual_rate)
+                    ece += bin_error * len(bin_preds) / total_samples
+            
+            # Convert ECE to score: 0 = perfect, 0.1 = poor -> scale to 0-1 (higher is better)
+            ece_score = max(0, 1.0 - ece / 0.1)
+            
+            # Calculate Sharpe Ratio from betting returns
+            # Simulate daily betting returns
+            profits = []
+            for pred, actual in zip(predictions, actuals):
+                pred_winner = 1 if pred > 0.5 else 0
+                pred_prob = pred if pred > 0.5 else (1 - pred)
+                pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
+                payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
+                
+                if pred_winner == actual:
+                    profit = payout_multiplier
+                else:
+                    profit = -1.0
+                profits.append(profit)
+            
+            profits = np.array(profits)
+            
+            # Calculate Sharpe Ratio
+            if len(profits) > 1 and np.std(profits) > 0:
+                sharpe_ratio = np.mean(profits) / np.std(profits)
+                # Normalize Sharpe: typical range -2 to 2, map to 0-1 (higher is better)
+                # A Sharpe > 1 is considered good, > 2 is excellent
+                sharpe_score = max(0, min(1.0, (sharpe_ratio + 2.0) / 4.0))
+            else:
+                sharpe_score = 0.0
+            
+            # Combine calibration metrics with equal weights
+            # This provides a bonus to the primary fitness metric
+            calibration_bonus = 0.1 * (ece_score + brier_score_normalized + sharpe_score) / 3.0
+        
         # Calculate different metrics
         if optimize_for == "accuracy":
             # Simple accuracy
             pred_labels = (predictions > 0.5).astype(int)
             fitness = np.mean(pred_labels == actuals)
+            # Add calibration bonus if enabled
+            fitness += calibration_bonus
         
         elif optimize_for == "roi":
             # Realistic ROI calculation with implied odds based on prediction probabilities
@@ -572,6 +645,8 @@ def create_elo_fitness_function(
             # rather than appearing as "break-even" (0.0)
             roi = (total_profit / total_bets) if total_bets > 0 else -1.0
             fitness = roi
+            # Add calibration bonus if enabled (scaled to ROI range)
+            fitness += calibration_bonus
         
         elif optimize_for == "log_loss":
             # Log Loss (lower is better, so we invert it for GA maximization)
@@ -588,6 +663,8 @@ def create_elo_fitness_function(
             # Poor: log_loss>0.693 -> fitness<0.5
             # This allows GA to distinguish between different "bad" models
             fitness = np.exp(-log_loss)
+            # Add calibration bonus if enabled
+            fitness += calibration_bonus
         
         else:  # composite
             # Accuracy component
@@ -642,6 +719,8 @@ def create_elo_fitness_function(
                 fitness_weights.get('brier_score', 0.2) * brier_score_score +
                 fitness_weights.get('roi', 0.3) * roi_score
             )
+            # Add calibration bonus if enabled
+            fitness += calibration_bonus
         
         return fitness
     
