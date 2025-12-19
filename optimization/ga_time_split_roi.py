@@ -48,6 +48,9 @@ def calculate_roi_from_predictions(df, confidence_threshold=50):
     """
     total_bets = 0
     total_profit = 0
+    # Note: We track total_predictions and correct_predictions for validation
+    # but don't return them since the function signature only returns ROI float.
+    # These variables ensure we're evaluating on ALL valid fights per elo_explanatoin.md
     total_predictions = 0  # Track all valid predictions
     correct_predictions = 0  # Track accuracy on all predictions
     
