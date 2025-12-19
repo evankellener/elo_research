@@ -71,16 +71,16 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         # Check if confidence exceeds threshold (scaled to match Elo-equivalent units)
         if confidence * CONFIDENCE_SCALE_FACTOR >= confidence_threshold:
             # Determine predicted winner and their win probability
-            pred_winner = 1 if pred_prob > 0.5 else 0
-            pred_prob_winner = pred_prob if pred_prob > 0.5 else (1 - pred_prob)
+            predicted_winner = 1 if pred_prob > 0.5 else 0
+            predicted_win_probability = pred_prob if pred_prob > 0.5 else (1 - pred_prob)
             
             # Calculate realistic payout based on implied odds
-            pred_prob_clamped = max(pred_prob_winner, MIN_BET_PROBABILITY)
-            payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
+            predicted_win_prob_clamped = max(predicted_win_probability, MIN_BET_PROBABILITY)
+            payout_multiplier = (1.0 / predicted_win_prob_clamped) - 1.0
             
             # Determine outcome
             actual_winner = int(row["result"])
-            won_bet = (pred_winner == actual_winner)
+            won_bet = (predicted_winner == actual_winner)
             
             # Calculate profit for this bet
             if won_bet:
@@ -100,12 +100,12 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
                 'opponent_elo': row.get('opp_precomp_elo', 0),
                 'pred_prob': pred_prob,
                 'confidence': confidence,
-                'predicted_winner': pred_winner,
+                'predicted_winner': predicted_winner,
                 'actual_winner': actual_winner,
                 'won_bet': won_bet,
                 'payout_multiplier': payout_multiplier,
                 'profit': profit,
-                'event_roi': profit  # ROI as decimal (e.g., 0.88 = 88% ROI)
+                'event_roi': profit  # Return on $1 bet as decimal (0.88 = won $0.88, -1.0 = lost $1)
             })
     
     if len(predictions) == 0:
@@ -266,9 +266,12 @@ Examples:
             print("SAMPLE OF 5 RANDOM BETTING EVENTS")
             print("="*60)
             
-            # Select up to 5 random events
+            # Select up to 5 random events (ensure at least 1 event exists)
             num_samples = min(5, len(roi_metrics['bet_events']))
-            sample_events = random.sample(roi_metrics['bet_events'], num_samples)
+            if num_samples > 0:
+                sample_events = random.sample(roi_metrics['bet_events'], num_samples)
+            else:
+                sample_events = []
             
             for i, event in enumerate(sample_events, 1):
                 print(f"\nEvent {i}:")
