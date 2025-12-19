@@ -261,7 +261,7 @@ Examples:
         print(f"Prediction Accuracy: {roi_metrics['accuracy']*100:.2f}%")
         
         # Display 5 random betting events to validate ROI
-        if roi_metrics['bet_events'] and len(roi_metrics['bet_events']) > 0:
+        if roi_metrics['bet_events']:
             print("\n" + "="*60)
             print("SAMPLE OF 5 RANDOM BETTING EVENTS")
             print("="*60)
