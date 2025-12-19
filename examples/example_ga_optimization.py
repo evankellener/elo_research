@@ -111,30 +111,26 @@ def test_out_of_sample_metrics(
     pred_labels = (predictions > 0.5).astype(int)
     accuracy = np.mean(pred_labels == actuals)
     
-    # Calculate ROI
+    # Calculate ROI - place bet on every valid fight (regardless of confidence threshold)
     total_profit = 0.0
     total_bets = 0
     for pred, actual in zip(predictions, actuals):
-        # Use prediction confidence (distance from 0.5) to determine if we should bet
-        confidence = abs(pred - 0.5) * 2  # Scale to 0-1 range
-        # Scale by 1000 to match typical Elo difference magnitude for threshold comparison
-        if confidence * 1000 >= confidence_threshold:
-            # Determine predicted winner and their win probability
-            pred_winner = 1 if pred > 0.5 else 0
-            pred_prob = pred if pred > 0.5 else (1 - pred)
-            
-            # Calculate realistic payout based on implied odds
-            pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
-            payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
-            
-            # We always bet 1 unit
-            if pred_winner == actual:
-                # Win: get back bet + payout
-                total_profit += payout_multiplier
-            else:
-                # Lose: lose the bet
-                total_profit -= 1.0
-            total_bets += 1
+        # Determine predicted winner and their win probability
+        pred_winner = 1 if pred > 0.5 else 0
+        pred_prob = pred if pred > 0.5 else (1 - pred)
+        
+        # Calculate realistic payout based on implied odds
+        pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
+        payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
+        
+        # We always bet 1 unit
+        if pred_winner == actual:
+            # Win: get back bet + payout
+            total_profit += payout_multiplier
+        else:
+            # Lose: lose the bet
+            total_profit -= 1.0
+        total_bets += 1
     
     roi = (total_profit / total_bets) if total_bets > 0 else -1.0
     

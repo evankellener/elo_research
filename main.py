@@ -72,7 +72,30 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         # Use prediction confidence to determine if we should bet
         confidence = abs(pred_prob - 0.5) * 2  # Scale to 0-1 range (0 = unsure, 1 = certain)
         
-        # Store all fight information (whether bet or not)
+        # Place bet on every valid fight (regardless of confidence threshold)
+        # Determine predicted winner and their win probability
+        predicted_winner = 1 if pred_prob > 0.5 else 0
+        predicted_win_probability = pred_prob if pred_prob > 0.5 else (1 - pred_prob)
+        
+        # Calculate realistic payout based on implied odds
+        predicted_win_prob_clamped = max(predicted_win_probability, MIN_BET_PROBABILITY)
+        payout_multiplier = (1.0 / predicted_win_prob_clamped) - 1.0
+        
+        # Determine outcome
+        actual_winner = int(row["result"])
+        won_bet = (predicted_winner == actual_winner)
+        
+        # Calculate profit for this bet
+        if won_bet:
+            profit = payout_multiplier
+            total_profit += payout_multiplier
+        else:
+            profit = -1.0
+            total_profit -= 1.0
+        
+        total_bets += 1
+        
+        # Store all fight information (bet is always placed)
         fight_info = {
             'event_name': row.get('EVENT', 'Unknown Event'),
             'event_date': row.get('DATE', None),
@@ -82,63 +105,31 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
             'opponent_elo': row.get('opp_precomp_elo', 0),
             'pred_prob': pred_prob,
             'confidence': confidence,
-            'predicted_winner': 1 if pred_prob > 0.5 else 0,
-            'actual_winner': int(row["result"]),
-            'bet_placed': False,
-            'won_bet': None,
-            'payout_multiplier': None,
-            'profit': None
+            'predicted_winner': predicted_winner,
+            'actual_winner': actual_winner,
+            'bet_placed': True,
+            'won_bet': won_bet,
+            'payout_multiplier': payout_multiplier,
+            'profit': profit
         }
         
-        # Check if confidence exceeds threshold (scaled to match Elo-equivalent units)
-        if confidence * CONFIDENCE_SCALE_FACTOR >= confidence_threshold:
-            # Determine predicted winner and their win probability
-            predicted_winner = 1 if pred_prob > 0.5 else 0
-            predicted_win_probability = pred_prob if pred_prob > 0.5 else (1 - pred_prob)
-            
-            # Calculate realistic payout based on implied odds
-            predicted_win_prob_clamped = max(predicted_win_probability, MIN_BET_PROBABILITY)
-            payout_multiplier = (1.0 / predicted_win_prob_clamped) - 1.0
-            
-            # Determine outcome
-            actual_winner = int(row["result"])
-            won_bet = (predicted_winner == actual_winner)
-            
-            # Calculate profit for this bet
-            if won_bet:
-                profit = payout_multiplier
-                total_profit += payout_multiplier
-            else:
-                profit = -1.0
-                total_profit -= 1.0
-            
-            total_bets += 1
-            
-            # Update fight info with bet details
-            fight_info.update({
-                'bet_placed': True,
-                'won_bet': won_bet,
-                'payout_multiplier': payout_multiplier,
-                'profit': profit
-            })
-            
-            # Store bet event details (for backward compatibility)
-            bet_events.append({
-                'event_name': row.get('EVENT', 'Unknown Event'),
-                'event_date': row.get('DATE', None),
-                'fighter': row.get('FIGHTER', 'Unknown'),
-                'opponent': row.get('opp_FIGHTER', 'Unknown'),
-                'fighter_elo': row.get('precomp_elo', 0),
-                'opponent_elo': row.get('opp_precomp_elo', 0),
-                'pred_prob': pred_prob,
-                'confidence': confidence,
-                'predicted_winner': predicted_winner,
-                'actual_winner': actual_winner,
-                'won_bet': won_bet,
-                'payout_multiplier': payout_multiplier,
-                'profit': profit,
-                'event_roi': profit  # Same as profit, kept for semantic clarity when displaying ROI
-            })
+        # Store bet event details (for backward compatibility)
+        bet_events.append({
+            'event_name': row.get('EVENT', 'Unknown Event'),
+            'event_date': row.get('DATE', None),
+            'fighter': row.get('FIGHTER', 'Unknown'),
+            'opponent': row.get('opp_FIGHTER', 'Unknown'),
+            'fighter_elo': row.get('precomp_elo', 0),
+            'opponent_elo': row.get('opp_precomp_elo', 0),
+            'pred_prob': pred_prob,
+            'confidence': confidence,
+            'predicted_winner': predicted_winner,
+            'actual_winner': actual_winner,
+            'won_bet': won_bet,
+            'payout_multiplier': payout_multiplier,
+            'profit': profit,
+            'event_roi': profit  # Same as profit, kept for semantic clarity when displaying ROI
+        })
         
         # Add to all fights list
         all_fights.append(fight_info)
