@@ -105,7 +105,7 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
                 'won_bet': won_bet,
                 'payout_multiplier': payout_multiplier,
                 'profit': profit,
-                'event_roi': profit  # Return on $1 bet as decimal (0.88 = won $0.88, -1.0 = lost $1)
+                'event_roi': profit  # Same as profit, kept for semantic clarity when displaying ROI
             })
     
     if len(predictions) == 0:
@@ -266,12 +266,9 @@ Examples:
             print("SAMPLE OF 5 RANDOM BETTING EVENTS")
             print("="*60)
             
-            # Select up to 5 random events (ensure at least 1 event exists)
+            # Select up to 5 random events
             num_samples = min(5, len(roi_metrics['bet_events']))
-            if num_samples > 0:
-                sample_events = random.sample(roi_metrics['bet_events'], num_samples)
-            else:
-                sample_events = []
+            sample_events = random.sample(roi_metrics['bet_events'], num_samples)
             
             for i, event in enumerate(sample_events, 1):
                 print(f"\nEvent {i}:")
