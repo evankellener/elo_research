@@ -36,6 +36,7 @@ import json
 from datetime import datetime
 from optimization.ga_engine import GeneticAlgorithm, create_elo_fitness_function, MIN_BET_PROBABILITY
 from optimization.optimal_k_with_mov import add_bout_counts, run_basic_elo, latest_ratings_from_trained_df
+from elo.visualization import plot_ga_optimization_history
 
 
 def test_out_of_sample_metrics(
@@ -334,6 +335,21 @@ def example_basic_optimization(optimize_for="accuracy"):
         print(f"History saved to: {history_file}")
     except (IOError, OSError) as e:
         print(f"Warning: Could not save history to {history_file}: {e}")
+    
+    # Generate and save visualization plots
+    print("\nGenerating optimization visualization...")
+    try:
+        history_df = ga.get_history_dataframe()
+        plot_filename = f"ga_optimization_{optimize_for}_{timestamp}.png"
+        plot_ga_optimization_history(
+            history_df, 
+            optimize_for=optimize_for,
+            save_path=plot_filename,
+            show_plot=True
+        )
+        print(f"Visualization saved to: {plot_filename}")
+    except Exception as e:
+        print(f"Warning: Could not generate plots: {e}")
     
     return best_individual, ga
 
