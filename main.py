@@ -74,31 +74,71 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
     # Calculate ROI by simulating betting strategy
     total_profit = 0.0
     total_bets = 0
+    bet_events = []  # Track individual betting events
     
-    for pred, actual in zip(predictions, actuals):
+    # Need to iterate through val_df again to track all bet details
+    for idx, row in val_df.iterrows():
+        # Filter valid fights (same as above)
+        if row.get("result") not in (0, 1):
+            continue
+        if pd.isna(row.get("DATE")):
+            continue
+        if row.get("precomp_elo") == row.get("opp_precomp_elo"):
+            continue
+        
+        # Check bout counts
+        if use_bout_filter:
+            bout1 = row.get("precomp_boutcount", 0)
+            bout2 = row.get("opp_precomp_boutcount", 0)
+            if pd.isna(bout1) or pd.isna(bout2) or bout1 < 1 or bout2 < 1:
+                continue
+        
+        # Calculate prediction probability
+        elo_diff = row["precomp_elo"] - row["opp_precomp_elo"]
+        pred_prob = 1.0 / (1.0 + 10.0 ** (-elo_diff / denominator))
+        
         # Use prediction confidence to determine if we should bet
-        confidence = abs(pred - 0.5) * 2  # Scale to 0-1 range (0 = unsure, 1 = certain)
+        confidence = abs(pred_prob - 0.5) * 2  # Scale to 0-1 range (0 = unsure, 1 = certain)
         
         # Check if confidence exceeds threshold (scaled to match Elo-equivalent units)
         if confidence * CONFIDENCE_SCALE_FACTOR >= confidence_threshold:
             # Determine predicted winner and their win probability
-            pred_winner = 1 if pred > 0.5 else 0
-            pred_prob = pred if pred > 0.5 else (1 - pred)
+            pred_winner = 1 if pred_prob > 0.5 else 0
+            pred_prob_winner = pred_prob if pred_prob > 0.5 else (1 - pred_prob)
             
             # Calculate realistic payout based on implied odds
-            # Formula: payout = (1 / probability) - 1
-            # Example: 70% favorite -> payout = (1/0.7) - 1 = 0.43 (bet $1 to win $0.43)
-            pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
+            pred_prob_clamped = max(pred_prob_winner, MIN_BET_PROBABILITY)
             payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
             
-            # We always bet 1 unit
-            if pred_winner == actual:
-                # Win: get back bet + payout
+            # Determine outcome
+            actual_winner = int(row["result"])
+            won_bet = (pred_winner == actual_winner)
+            
+            # Calculate profit for this bet
+            if won_bet:
+                profit = payout_multiplier
                 total_profit += payout_multiplier
             else:
-                # Lose: lose the bet
+                profit = -1.0
                 total_profit -= 1.0
+            
             total_bets += 1
+            
+            # Store bet event details
+            bet_events.append({
+                'fighter': row.get('FIGHTER', 'Unknown'),
+                'opponent': row.get('opp_FIGHTER', 'Unknown'),
+                'fighter_elo': row.get('precomp_elo', 0),
+                'opponent_elo': row.get('opp_precomp_elo', 0),
+                'pred_prob': pred_prob,
+                'confidence': confidence,
+                'predicted_winner': pred_winner,
+                'actual_winner': actual_winner,
+                'won_bet': won_bet,
+                'payout_multiplier': payout_multiplier,
+                'profit': profit,
+                'event_roi': profit  # profit on $1 bet
+            })
     
     roi = (total_profit / total_bets) if total_bets > 0 else -1.0
     
@@ -115,7 +155,8 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         'total_profit': total_profit,
         'total_wagered': float(total_bets),
         'accuracy': accuracy,
-        'total_predictions': len(predictions_arr)
+        'total_predictions': len(predictions_arr),
+        'bet_events': bet_events
     }
 
 def main():
@@ -237,6 +278,50 @@ Examples:
         print(f"Total Profit: ${roi_metrics['total_profit']:.2f}")
         print(f"ROI: {roi_metrics['roi_percent']:.2f}%")
         print(f"Prediction Accuracy: {roi_metrics['accuracy']*100:.2f}%")
+        
+        # Display 5 random betting events to validate ROI
+        if roi_metrics['bet_events'] and len(roi_metrics['bet_events']) > 0:
+            import random
+            print("\n" + "="*60)
+            print("SAMPLE OF 5 RANDOM BETTING EVENTS")
+            print("="*60)
+            
+            # Select up to 5 random events
+            num_samples = min(5, len(roi_metrics['bet_events']))
+            sample_events = random.sample(roi_metrics['bet_events'], num_samples)
+            
+            for i, event in enumerate(sample_events, 1):
+                print(f"\nEvent {i}:")
+                print(f"  Match: {event['fighter']} vs {event['opponent']}")
+                print(f"  Elo Ratings: {event['fighter_elo']:.1f} vs {event['opponent_elo']:.1f}")
+                
+                # Show who was predicted to win
+                if event['predicted_winner'] == 1:
+                    predicted_fighter = event['fighter']
+                    pred_prob_display = event['pred_prob'] * 100
+                else:
+                    predicted_fighter = event['opponent']
+                    pred_prob_display = (1 - event['pred_prob']) * 100
+                
+                print(f"  Predicted Winner: {predicted_fighter} ({pred_prob_display:.1f}% confidence)")
+                print(f"  Confidence Level: {event['confidence']*100:.1f}%")
+                print(f"  Payout Odds: {event['payout_multiplier']:.2f}x (bet $1 to win ${event['payout_multiplier']:.2f})")
+                
+                # Show actual outcome
+                if event['actual_winner'] == 1:
+                    actual_winner_name = event['fighter']
+                else:
+                    actual_winner_name = event['opponent']
+                print(f"  Actual Winner: {actual_winner_name}")
+                
+                # Show bet result
+                if event['won_bet']:
+                    print(f"  Result: WON - Profit: ${event['profit']:.2f}")
+                else:
+                    print(f"  Result: LOST - Loss: ${abs(event['profit']):.2f}")
+                print(f"  Event ROI: {event['event_roi']*100:.2f}%")
+            
+            print("\n" + "="*60)
         
         print("\nNote: ROI is displayed as a percentage of return on investment.")
         print("      For example, 34.92% means $1 bet returns $1.3492 on average.")
