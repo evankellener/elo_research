@@ -34,8 +34,137 @@ import numpy as np
 import pandas as pd
 import json
 from datetime import datetime
-from optimization.ga_engine import GeneticAlgorithm, create_elo_fitness_function
-from optimization.optimal_k_with_mov import add_bout_counts
+from optimization.ga_engine import GeneticAlgorithm, create_elo_fitness_function, MIN_BET_PROBABILITY
+from optimization.optimal_k_with_mov import add_bout_counts, run_basic_elo, latest_ratings_from_trained_df
+
+
+def test_out_of_sample_metrics(
+    df_trained_with_elo,
+    test_df,
+    denominator,
+    base_elo=1500,
+    confidence_threshold=50,
+    optimize_for="accuracy",
+    verbose=True
+):
+    """
+    Test on out-of-sample data (past3_events.csv) and compute metrics.
+    
+    Args:
+        df_trained_with_elo: Training DataFrame with Elo ratings already computed
+        test_df: Test DataFrame (past3_events.csv)
+        denominator: Denominator parameter for probability calculation
+        base_elo: Base Elo rating for new fighters
+        confidence_threshold: Threshold for making betting decisions (for ROI)
+        optimize_for: Metric to optimize for ("accuracy", "roi", "log_loss")
+        verbose: Whether to print verbose output
+        
+    Returns:
+        Dictionary with metrics: accuracy, roi, log_loss
+    """
+    # Get final ratings from training data
+    rating_lookup = latest_ratings_from_trained_df(df_trained_with_elo, base_elo=base_elo)
+    
+    # Prepare test data
+    tdf = test_df.copy()
+    tdf["result"] = pd.to_numeric(tdf["result"], errors="coerce")
+    tdf["date"] = pd.to_datetime(tdf["date"])
+    
+    predictions = []
+    actuals = []
+    
+    for _, row in tdf.iterrows():
+        f1 = row["fighter"]
+        f2 = row["opp_fighter"]
+        res = row["result"]
+        
+        if res not in (0, 1):
+            continue
+        
+        # Use postcomp_elo from training as precomp_elo for OOS
+        r1 = rating_lookup.get(f1, base_elo)
+        r2 = rating_lookup.get(f2, base_elo)
+        
+        # Skip if ratings are equal
+        if r1 == r2:
+            continue
+        
+        # Calculate prediction probability
+        elo_diff = r1 - r2
+        pred_prob = 1.0 / (1.0 + 10.0 ** (-elo_diff / denominator))
+        
+        predictions.append(pred_prob)
+        actuals.append(int(res))
+    
+    if len(predictions) == 0:
+        return {
+            'accuracy': 0.0,
+            'roi': -1.0,
+            'log_loss': float('inf'),
+            'n_predictions': 0
+        }
+    
+    predictions = np.array(predictions)
+    actuals = np.array(actuals)
+    
+    # Calculate accuracy
+    pred_labels = (predictions > 0.5).astype(int)
+    accuracy = np.mean(pred_labels == actuals)
+    
+    # Calculate ROI
+    total_profit = 0.0
+    total_bets = 0
+    for pred, actual in zip(predictions, actuals):
+        # Use prediction confidence (distance from 0.5) to determine if we should bet
+        confidence = abs(pred - 0.5) * 2  # Scale to 0-1 range
+        # Scale by 1000 to match typical Elo difference magnitude for threshold comparison
+        if confidence * 1000 >= confidence_threshold:
+            # Determine predicted winner and their win probability
+            pred_winner = 1 if pred > 0.5 else 0
+            pred_prob = pred if pred > 0.5 else (1 - pred)
+            
+            # Calculate realistic payout based on implied odds
+            pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
+            payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
+            
+            # We always bet 1 unit
+            if pred_winner == actual:
+                # Win: get back bet + payout
+                total_profit += payout_multiplier
+            else:
+                # Lose: lose the bet
+                total_profit -= 1.0
+            total_bets += 1
+    
+    roi = (total_profit / total_bets) if total_bets > 0 else -1.0
+    
+    # Calculate log loss
+    eps = 1e-15
+    predictions_clipped = np.clip(predictions, eps, 1 - eps)
+    log_loss = np.mean(
+        -(actuals * np.log(predictions_clipped) +
+          (1 - actuals) * np.log(1 - predictions_clipped))
+    )
+    
+    if verbose:
+        print(f"\n{'='*70}")
+        print("OUT-OF-SAMPLE TESTING (past3_events.csv)")
+        print(f"{'='*70}")
+        print(f"Number of predictions: {len(predictions)}")
+        print(f"OOS Accuracy: {accuracy:.4f}")
+        print(f"OOS ROI: {roi:.4f} ({roi * 100:.2f}%)")
+        print(f"OOS Log Loss: {log_loss:.4f}")
+        if total_bets > 0:
+            print(f"Number of bets placed: {total_bets}")
+        print(f"{'='*70}")
+    
+    return {
+        'accuracy': accuracy,
+        'roi': roi,
+        'log_loss': log_loss,
+        'n_predictions': len(predictions),
+        'n_bets': total_bets
+    }
 
 
 def example_basic_optimization(optimize_for="accuracy"):
@@ -53,6 +182,7 @@ def example_basic_optimization(optimize_for="accuracy"):
     # Load data
     print("\nLoading data...")
     df = pd.read_csv("data/interleaved_cleaned.csv", low_memory=False)
+    test_df = pd.read_csv("data/past3_events.csv", low_memory=False)
     
     # Preprocess
     df["result"] = pd.to_numeric(df["result"], errors="coerce")
@@ -69,6 +199,7 @@ def example_basic_optimization(optimize_for="accuracy"):
         df["opp_precomp_boutcount"] = pd.to_numeric(df["opp_precomp_boutcount"], errors="coerce")
     
     print(f"Using {len(df)} fights for optimization")
+    print(f"Loaded {len(test_df)} fights for out-of-sample testing")
     
     # Define parameter space
     param_bounds = {
@@ -103,6 +234,27 @@ def example_basic_optimization(optimize_for="accuracy"):
     )
     
     best_individual = ga.run(generations=20, early_stop_generations=10)
+    
+    # Recalculate Elo ratings with best parameters on full training data
+    print("\nRecalculating Elo ratings with best parameters...")
+    df_with_best_elo = run_basic_elo(
+        df.copy(),
+        k=best_individual.genes['k'],
+        base_elo=1500,
+        denominator=best_individual.genes['denominator'],
+        use_mov=False
+    )
+    
+    # Test on out-of-sample data
+    oos_metrics = test_out_of_sample_metrics(
+        df_with_best_elo,
+        test_df,
+        denominator=best_individual.genes['denominator'],
+        base_elo=1500,
+        confidence_threshold=best_individual.genes.get('confidence_threshold', 50),
+        optimize_for=optimize_for,
+        verbose=True
+    )
     
     print("\n" + "="*70)
     print("RESULTS")
@@ -160,7 +312,8 @@ def example_basic_optimization(optimize_for="accuracy"):
         "elite_size": ga.elite_size,
         "mutation_rate": ga.mutation_rate,
         "crossover_rate": ga.crossover_rate,
-        "history": ga.history
+        "history": ga.history,
+        "oos_metrics": oos_metrics
     }
     
     # Add mode-specific metrics
