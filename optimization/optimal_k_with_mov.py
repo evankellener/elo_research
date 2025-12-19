@@ -70,7 +70,7 @@ def compute_fight_predictions(df):
       - valid date
       - result in {0,1}
       - different precomp elos
-      - both fighters have boutcount >= 1
+      - both fighters have boutcount > 1 (more than one fight, as specified in elo_explanatoin.md)
       - both fighters have prior history date wise
     """
     hist = build_fighter_history(df)
@@ -86,11 +86,12 @@ def compute_fight_predictions(df):
         if r["precomp_elo"] == r["opp_precomp_elo"]:
             continue
 
-        # boutcount filter: both must have at least one prior fight
+        # boutcount filter: both must have more than one prior fight
+        # (as specified in elo_explanatoin.md: "more than one fight")
         # Handle potential NaN values from numeric conversion
         boutcount = r["precomp_boutcount"]
         opp_boutcount = r["opp_precomp_boutcount"]
-        if pd.isna(boutcount) or pd.isna(opp_boutcount) or boutcount < 1 or opp_boutcount < 1:
+        if pd.isna(boutcount) or pd.isna(opp_boutcount) or boutcount <= 1 or opp_boutcount <= 1:
             continue
 
         # extra date based prior history check

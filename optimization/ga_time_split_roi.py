@@ -51,9 +51,11 @@ def calculate_roi_from_predictions(df, confidence_threshold=50):
         elo2 = row.get('opp_precomp_elo', 1500)
         
         # Check if bout count filters pass
+        # Filter to only include fights where both fighters have had more than one fight
+        # (as specified in elo_explanatoin.md: "more than one fight")
         bout1 = row.get('precomp_boutcount', 0)
         bout2 = row.get('opp_precomp_boutcount', 0)
-        if pd.isna(bout1) or pd.isna(bout2) or bout1 < 1 or bout2 < 1:
+        if pd.isna(bout1) or pd.isna(bout2) or bout1 <= 1 or bout2 <= 1:
             continue
         
         elo_diff = abs(elo1 - elo2)
