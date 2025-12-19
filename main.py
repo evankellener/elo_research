@@ -11,12 +11,6 @@ from elo.elo_utils import add_bout_counts
 # 0.01 = 1% probability = 99:1 maximum odds
 MIN_BET_PROBABILITY = 0.01
 
-# Confidence scaling factor to convert probability confidence (0-1) to Elo points
-# An Elo difference of 100 points translates to roughly 14% confidence
-# This scaling (1000) allows confidence_threshold in Elo-equivalent units
-# e.g., confidence_threshold=50 means bet when confidence > 5% (50/1000)
-CONFIDENCE_SCALE_FACTOR = 1000
-
 def calculate_roi(df, denominator=400, confidence_threshold=50, validation_percentile=0.8, use_bout_filter=False):
     """
     Calculate ROI for the Elo predictions using the same method as GA optimization.
@@ -24,7 +18,8 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
     Args:
         df: DataFrame with fight data including precomp_elo columns
         denominator: Elo denominator for calculating win probabilities
-        confidence_threshold: Minimum confidence threshold for betting (default 50)
+        confidence_threshold: DEPRECATED - No longer used. Bets are placed on all valid fights.
+                            Kept for backward compatibility.
         validation_percentile: Use fights after this percentile for validation (default 0.8)
         use_bout_filter: If True, filter out fights where either fighter has no prior history (default False)
     
@@ -69,10 +64,34 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         predictions.append(pred_prob)
         actuals.append(int(row["result"]))
         
-        # Use prediction confidence to determine if we should bet
-        confidence = abs(pred_prob - 0.5) * 2  # Scale to 0-1 range (0 = unsure, 1 = certain)
+        # Calculate confidence for display purposes only (0 = unsure, 1 = certain)
+        # Confidence is stored in fight info for display but no longer affects betting
+        confidence = abs(pred_prob - 0.5) * 2  # Scale to 0-1 range
         
-        # Store all fight information (whether bet or not)
+        # Place bet on every valid fight (regardless of confidence threshold)
+        # Determine predicted winner and their win probability
+        predicted_winner = 1 if pred_prob > 0.5 else 0
+        predicted_win_probability = pred_prob if pred_prob > 0.5 else (1 - pred_prob)
+        
+        # Calculate realistic payout based on implied odds
+        predicted_win_prob_clamped = max(predicted_win_probability, MIN_BET_PROBABILITY)
+        payout_multiplier = (1.0 / predicted_win_prob_clamped) - 1.0
+        
+        # Determine outcome
+        actual_winner = int(row["result"])
+        won_bet = (predicted_winner == actual_winner)
+        
+        # Calculate profit for this bet
+        if won_bet:
+            profit = payout_multiplier
+            total_profit += payout_multiplier
+        else:
+            profit = -1.0
+            total_profit -= 1.0
+        
+        total_bets += 1
+        
+        # Store all fight information (bet is always placed)
         fight_info = {
             'event_name': row.get('EVENT', 'Unknown Event'),
             'event_date': row.get('DATE', None),
@@ -82,63 +101,31 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
             'opponent_elo': row.get('opp_precomp_elo', 0),
             'pred_prob': pred_prob,
             'confidence': confidence,
-            'predicted_winner': 1 if pred_prob > 0.5 else 0,
-            'actual_winner': int(row["result"]),
-            'bet_placed': False,
-            'won_bet': None,
-            'payout_multiplier': None,
-            'profit': None
+            'predicted_winner': predicted_winner,
+            'actual_winner': actual_winner,
+            'bet_placed': True,
+            'won_bet': won_bet,
+            'payout_multiplier': payout_multiplier,
+            'profit': profit
         }
         
-        # Check if confidence exceeds threshold (scaled to match Elo-equivalent units)
-        if confidence * CONFIDENCE_SCALE_FACTOR >= confidence_threshold:
-            # Determine predicted winner and their win probability
-            predicted_winner = 1 if pred_prob > 0.5 else 0
-            predicted_win_probability = pred_prob if pred_prob > 0.5 else (1 - pred_prob)
-            
-            # Calculate realistic payout based on implied odds
-            predicted_win_prob_clamped = max(predicted_win_probability, MIN_BET_PROBABILITY)
-            payout_multiplier = (1.0 / predicted_win_prob_clamped) - 1.0
-            
-            # Determine outcome
-            actual_winner = int(row["result"])
-            won_bet = (predicted_winner == actual_winner)
-            
-            # Calculate profit for this bet
-            if won_bet:
-                profit = payout_multiplier
-                total_profit += payout_multiplier
-            else:
-                profit = -1.0
-                total_profit -= 1.0
-            
-            total_bets += 1
-            
-            # Update fight info with bet details
-            fight_info.update({
-                'bet_placed': True,
-                'won_bet': won_bet,
-                'payout_multiplier': payout_multiplier,
-                'profit': profit
-            })
-            
-            # Store bet event details (for backward compatibility)
-            bet_events.append({
-                'event_name': row.get('EVENT', 'Unknown Event'),
-                'event_date': row.get('DATE', None),
-                'fighter': row.get('FIGHTER', 'Unknown'),
-                'opponent': row.get('opp_FIGHTER', 'Unknown'),
-                'fighter_elo': row.get('precomp_elo', 0),
-                'opponent_elo': row.get('opp_precomp_elo', 0),
-                'pred_prob': pred_prob,
-                'confidence': confidence,
-                'predicted_winner': predicted_winner,
-                'actual_winner': actual_winner,
-                'won_bet': won_bet,
-                'payout_multiplier': payout_multiplier,
-                'profit': profit,
-                'event_roi': profit  # Same as profit, kept for semantic clarity when displaying ROI
-            })
+        # Store bet event details (for backward compatibility)
+        bet_events.append({
+            'event_name': row.get('EVENT', 'Unknown Event'),
+            'event_date': row.get('DATE', None),
+            'fighter': row.get('FIGHTER', 'Unknown'),
+            'opponent': row.get('opp_FIGHTER', 'Unknown'),
+            'fighter_elo': row.get('precomp_elo', 0),
+            'opponent_elo': row.get('opp_precomp_elo', 0),
+            'pred_prob': pred_prob,
+            'confidence': confidence,
+            'predicted_winner': predicted_winner,
+            'actual_winner': actual_winner,
+            'won_bet': won_bet,
+            'payout_multiplier': payout_multiplier,
+            'profit': profit,
+            'event_roi': profit  # Same as profit, kept for semantic clarity when displaying ROI
+        })
         
         # Add to all fights list
         all_fights.append(fight_info)
@@ -210,7 +197,7 @@ Examples:
     parser.add_argument('--show-roi', action='store_true',
                         help='Calculate and display ROI metrics')
     parser.add_argument('--confidence-threshold', type=float, default=50.0,
-                        help='Confidence threshold for betting in ROI calculation (default: 50.0)')
+                        help='[DEPRECATED - No longer used] Confidence threshold for betting in ROI calculation (default: 50.0). Bets are now placed on all valid fights.')
     parser.add_argument('--validation-percentile', type=float, default=0.8,
                         help='Percentile for validation split in ROI calculation (default: 0.8)')
     parser.add_argument('--use-ga-setup', action='store_true',
@@ -276,7 +263,7 @@ Examples:
         print("\n" + "="*60)
         print("ROI CALCULATION")
         print("="*60)
-        print(f"Confidence Threshold: {args.confidence_threshold:.2f}")
+        print(f"Confidence Threshold: {args.confidence_threshold:.2f} [DEPRECATED - Not used, bets placed on all valid fights]")
         print(f"Validation Split: Last {(1-args.validation_percentile)*100:.0f}% of data")
         if args.use_ga_setup:
             print("Using GA setup: Filtering by bout counts (both fighters must have prior history)")

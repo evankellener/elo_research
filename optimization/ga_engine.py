@@ -471,7 +471,10 @@ def create_elo_fitness_function(
         # Extract parameters with defaults
         k = params.get("k", 32)
         denominator = params.get("denominator", 400)
-        confidence_threshold = params.get("confidence_threshold", 50)
+        # confidence_threshold is DEPRECATED and no longer used
+        # Bets are now placed on all valid fights regardless of confidence
+        # Parameter kept for backward compatibility with existing optimization runs
+        _ = params.get("confidence_threshold", 50)  # Explicitly mark as unused
         
         # MOV weights (use defaults if not in params)
         use_mov = any(key.startswith("w_") for key in params.keys())
@@ -540,33 +543,29 @@ def create_elo_fitness_function(
         
         elif optimize_for == "roi":
             # Realistic ROI calculation with implied odds based on prediction probabilities
+            # Place bet on every valid fight (regardless of confidence threshold)
             total_profit = 0.0
             total_bets = 0
             for pred, actual in zip(predictions, actuals):
-                # Use prediction confidence (distance from 0.5) to determine if we should bet
-                confidence = abs(pred - 0.5) * 2  # Scale to 0-1 range
-                # Scale by 1000 to match typical Elo difference magnitude for threshold comparison
-                # e.g., confidence_threshold=50 means bet when confidence > 0.05 (5%)
-                if confidence * 1000 >= confidence_threshold:
-                    # Determine predicted winner and their win probability
-                    pred_winner = 1 if pred > 0.5 else 0
-                    pred_prob = pred if pred > 0.5 else (1 - pred)
-                    
-                    # Calculate realistic payout based on implied odds
-                    # If pred_prob = 0.7 (70% favorite): payout = 1/0.7 - 1 ≈ 0.43 (bet $1 to win $0.43)
-                    # If pred_prob = 0.3 (30% underdog): payout = 1/0.3 - 1 ≈ 2.33 (bet $1 to win $2.33)
-                    # Clamp probability to avoid division by very small numbers
-                    pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
-                    payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
-                    
-                    # We always bet 1 unit
-                    if pred_winner == actual:
-                        # Win: get back bet + payout
-                        total_profit += payout_multiplier
-                    else:
-                        # Lose: lose the bet
-                        total_profit -= 1.0
-                    total_bets += 1
+                # Determine predicted winner and their win probability
+                pred_winner = 1 if pred > 0.5 else 0
+                pred_prob = pred if pred > 0.5 else (1 - pred)
+                
+                # Calculate realistic payout based on implied odds
+                # If pred_prob = 0.7 (70% favorite): payout = 1/0.7 - 1 ≈ 0.43 (bet $1 to win $0.43)
+                # If pred_prob = 0.3 (30% underdog): payout = 1/0.3 - 1 ≈ 2.33 (bet $1 to win $2.33)
+                # Clamp probability to avoid division by very small numbers
+                pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
+                payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
+                
+                # We always bet 1 unit
+                if pred_winner == actual:
+                    # Win: get back bet + payout
+                    total_profit += payout_multiplier
+                else:
+                    # Lose: lose the bet
+                    total_profit -= 1.0
+                total_bets += 1
             
             # If no bets were made, return worst possible ROI (-1.0)
             # This ensures models that make no predictions are penalized
@@ -610,32 +609,25 @@ def create_elo_fitness_function(
             # Scale: perfect = 0, random = 0.25, invert to make higher better
             brier_score_score = max(0, 1.0 - brier_score / 0.25)
             
-            # ROI component
+            # ROI component - place bet on every valid fight (no confidence threshold)
             total_profit = 0
             total_bets = 0
-            # Calculate Elo differences for confidence filtering
-            elo_diffs = []
-            for i in range(len(predictions)):
-                # We need to recalculate elo_diff from the row data
-                # For now, use prediction confidence as proxy
-                elo_diffs.append(abs(predictions[i] - 0.5) * 1000)  # Scale to Elo points
             
-            for i, (pred, actual, elo_diff_val) in enumerate(zip(predictions, actuals, elo_diffs)):
-                if elo_diff_val >= confidence_threshold:
-                    # Determine predicted winner and their win probability
-                    pred_winner = 1 if pred > 0.5 else 0
-                    pred_prob = pred if pred > 0.5 else (1 - pred)
-                    
-                    # Calculate realistic payout based on implied odds
-                    # Clamp probability to avoid division by very small numbers
-                    pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
-                    payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
-                    
-                    if pred_winner == actual:
-                        total_profit += payout_multiplier
-                    else:
-                        total_profit -= 1.0
-                    total_bets += 1
+            for pred, actual in zip(predictions, actuals):
+                # Determine predicted winner and their win probability
+                pred_winner = 1 if pred > 0.5 else 0
+                pred_prob = pred if pred > 0.5 else (1 - pred)
+                
+                # Calculate realistic payout based on implied odds
+                # Clamp probability to avoid division by very small numbers
+                pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
+                payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
+                
+                if pred_winner == actual:
+                    total_profit += payout_multiplier
+                else:
+                    total_profit -= 1.0
+                total_bets += 1
             
             # If no bets were made, return worst possible ROI (-1.0)
             # This ensures models that make no predictions are penalized

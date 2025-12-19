@@ -470,8 +470,8 @@ class TestOptimizationModeDisplay(unittest.TestCase):
 class TestROIFitnessFunction(unittest.TestCase):
     """Test ROI fitness function behavior."""
     
-    def test_roi_no_bets_penalty(self):
-        """Test that ROI fitness returns -1.0 when no bets are made."""
+    def test_roi_bets_placed_on_all_valid_fights(self):
+        """Test that ROI places bets on all valid fights regardless of confidence."""
         import pandas as pd
         from optimization.ga_engine import create_elo_fitness_function
         
@@ -495,18 +495,18 @@ class TestROIFitnessFunction(unittest.TestCase):
             optimize_for="roi"
         )
         
-        # Test with very high confidence threshold that prevents any bets
+        # Test with any confidence threshold - bets should be placed on all valid fights
         params = {
             'k': 32,
             'denominator': 400,
-            'confidence_threshold': 10000  # Extremely high to prevent any bets
+            'confidence_threshold': 10000  # High threshold, but bets still placed
         }
         
         fitness = fitness_fn(params)
         
-        # Should return -1.0 (worst possible ROI) when no bets are made
-        self.assertEqual(fitness, -1.0,
-                        "ROI fitness should return -1.0 when no bets are made")
+        # Should return a valid fitness value (not -1.0) because bets are placed on all valid fights
+        self.assertNotEqual(fitness, -1.0,
+                        "ROI fitness should place bets on all valid fights regardless of confidence threshold")
     
     def test_roi_negative_performance(self):
         """Test that ROI fitness can return negative values for losing strategies."""
