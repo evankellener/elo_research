@@ -9,6 +9,7 @@ Usage:
     python examples/example_ga_optimization.py --optimize-for roi
     python examples/example_ga_optimization.py --optimize-for log_loss
     python examples/example_ga_optimization.py --optimize-for accuracy
+    python examples/example_ga_optimization.py --optimize-for roi --include-calibration
 
 Optimization Modes:
     - accuracy: Optimize for prediction accuracy (higher is better, 0-1)
@@ -16,6 +17,19 @@ Optimization Modes:
     - log_loss: Optimize for logarithmic loss (lower raw values are better,
                 but displayed as higher fitness for GA)
     - composite: Optimize for weighted combination of all metrics
+
+Calibration Metrics Flag:
+    --include-calibration: When enabled, includes calibration metrics in the fitness
+                          function to encourage better-calibrated predictions:
+                          - ECE (Expected Calibration Error): Measures how well 
+                            predicted probabilities match actual win rates
+                          - Brier Score: Measures accuracy of probability predictions
+                          - Sharpe Ratio: Risk-adjusted return measure from betting
+                          
+                          This helps find parameters that not only maximize the primary
+                          metric (accuracy/ROI/log_loss) but also produce well-calibrated
+                          probability predictions that may generalize better to 
+                          out-of-sample data.
 
 Output:
     The script saves two files after optimization:
@@ -435,12 +449,18 @@ Examples:
   python examples/example_ga_optimization.py
   python examples/example_ga_optimization.py --optimize-for roi
   python examples/example_ga_optimization.py --optimize-for log_loss
+  python examples/example_ga_optimization.py --optimize-for roi --include-calibration
   
 Optimization Modes:
   accuracy  : Maximize prediction accuracy (0.0 to 1.0)
   roi       : Maximize return on investment (-1.0 to 1.0)
   log_loss  : Minimize logarithmic loss (shown as fitness 0.0 to 1.0)
   composite : Optimize weighted combination of all metrics
+
+Calibration Metrics:
+  --include-calibration : Includes ECE, Brier Score, and Sharpe Ratio in fitness.
+                         This encourages well-calibrated probability predictions
+                         that may generalize better to out-of-sample data.
         """
     )
     parser.add_argument(

@@ -514,7 +514,14 @@ def create_elo_fitness_function(
             # Both fighters must have more than one fight (as specified in elo_explanatoin.md)
             bout1 = row.get("precomp_boutcount", 0)
             bout2 = row.get("opp_precomp_boutcount", 0)
-            if pd.isna(bout1) or pd.isna(bout2) or bout1 <= 1 or bout2 <= 1:
+            # Ensure numeric conversion
+            try:
+                bout1 = float(bout1) if bout1 is not None and not pd.isna(bout1) else 0
+                bout2 = float(bout2) if bout2 is not None and not pd.isna(bout2) else 0
+            except (ValueError, TypeError):
+                bout1 = 0
+                bout2 = 0
+            if bout1 <= 1 or bout2 <= 1:
                 continue
             
             # Calculate prediction probability
