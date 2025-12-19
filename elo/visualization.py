@@ -145,7 +145,7 @@ def plot_ga_optimization_history(history_df, optimize_for="accuracy", save_path=
     ax2_twin = ax2.twinx()  # Create twin axis for denominator
     
     # Plot K-factor on left y-axis
-    line1 = ax2.plot(generations, k_values, 'o-', color='#1f77b4', linewidth=2.5,
+    line1 = ax2.plot(generations, k_values, color='#1f77b4', linewidth=2.5,
                      label='K-factor', marker='o', markersize=6, 
                      markerfacecolor='lightblue', markeredgecolor='darkblue',
                      markeredgewidth=1.5, alpha=0.9)
@@ -154,7 +154,7 @@ def plot_ga_optimization_history(history_df, optimize_for="accuracy", save_path=
     ax2.tick_params(axis='y', labelcolor='#1f77b4')
     
     # Plot denominator on right y-axis
-    line2 = ax2_twin.plot(generations, denominator_values, 's-', color='#ff7f0e', 
+    line2 = ax2_twin.plot(generations, denominator_values, color='#ff7f0e', 
                           linewidth=2.5, label='Denominator', marker='s', markersize=6,
                           markerfacecolor='#ffd580', markeredgecolor='#ff7f0e',
                           markeredgewidth=1.5, alpha=0.9)
