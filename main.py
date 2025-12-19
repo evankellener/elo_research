@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import argparse
 import random
+from collections import defaultdict
 from elo.calculator import run_basic_elo, run_basic_elo_with_mov
 from elo.visualization import display_top_n_elos, most_recent_elo, graph_fighter_elo_history
 from elo.elo_utils import add_bout_counts
@@ -269,7 +270,6 @@ Examples:
             print("="*60)
             
             # Group bet events by UFC event name
-            from collections import defaultdict
             events_by_name = defaultdict(list)
             for bet_event in roi_metrics['bet_events']:
                 event_name = bet_event['event_name']
@@ -287,8 +287,7 @@ Examples:
                 event_total_bets = len(fights_in_event)
                 event_wins = sum(1 for f in fights_in_event if f['won_bet'])
                 event_profit = sum(f['profit'] for f in fights_in_event)
-                event_wagered = float(event_total_bets)
-                event_roi = (event_profit / event_wagered * 100) if event_wagered > 0 else 0.0
+                event_roi = (event_profit / event_total_bets * 100) if event_total_bets > 0 else 0.0
                 
                 # Get event date from first fight
                 event_date = fights_in_event[0].get('event_date', 'Unknown Date')
