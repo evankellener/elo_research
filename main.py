@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import argparse
+import random
 from elo.calculator import run_basic_elo, run_basic_elo_with_mov
 from elo.visualization import display_top_n_elos, most_recent_elo, graph_fighter_elo_history
 from elo.elo_utils import add_bout_counts
@@ -33,11 +34,14 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
     cutoff = df["DATE"].quantile(validation_percentile)
     val_df = df[df["DATE"] > cutoff].copy()
     
-    # Extract predictions and actuals
+    # Calculate ROI by simulating betting strategy and tracking all predictions
+    total_profit = 0.0
+    total_bets = 0
+    bet_events = []  # Track individual betting events
     predictions = []
     actuals = []
     
-    for _, row in val_df.iterrows():
+    for idx, row in val_df.iterrows():
         # Filter valid fights
         if row.get("result") not in (0, 1):
             continue
@@ -57,45 +61,9 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         elo_diff = row["precomp_elo"] - row["opp_precomp_elo"]
         pred_prob = 1.0 / (1.0 + 10.0 ** (-elo_diff / denominator))
         
+        # Track all predictions for accuracy calculation
         predictions.append(pred_prob)
         actuals.append(int(row["result"]))
-    
-    if len(predictions) == 0:
-        # Return worst possible ROI when no valid predictions
-        # -100% means complete loss of all wagered money
-        return {
-            'roi': -1.0,
-            'roi_percent': -100.0,
-            'total_bets': 0,
-            'total_profit': 0.0,
-            'accuracy': 0.0
-        }
-    
-    # Calculate ROI by simulating betting strategy
-    total_profit = 0.0
-    total_bets = 0
-    bet_events = []  # Track individual betting events
-    
-    # Need to iterate through val_df again to track all bet details
-    for idx, row in val_df.iterrows():
-        # Filter valid fights (same as above)
-        if row.get("result") not in (0, 1):
-            continue
-        if pd.isna(row.get("DATE")):
-            continue
-        if row.get("precomp_elo") == row.get("opp_precomp_elo"):
-            continue
-        
-        # Check bout counts
-        if use_bout_filter:
-            bout1 = row.get("precomp_boutcount", 0)
-            bout2 = row.get("opp_precomp_boutcount", 0)
-            if pd.isna(bout1) or pd.isna(bout2) or bout1 < 1 or bout2 < 1:
-                continue
-        
-        # Calculate prediction probability
-        elo_diff = row["precomp_elo"] - row["opp_precomp_elo"]
-        pred_prob = 1.0 / (1.0 + 10.0 ** (-elo_diff / denominator))
         
         # Use prediction confidence to determine if we should bet
         confidence = abs(pred_prob - 0.5) * 2  # Scale to 0-1 range (0 = unsure, 1 = certain)
@@ -139,6 +107,19 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
                 'profit': profit,
                 'event_roi': profit  # profit on $1 bet
             })
+    
+    if len(predictions) == 0:
+        # Return worst possible ROI when no valid predictions
+        # -100% means complete loss of all wagered money
+        return {
+            'roi': -1.0,
+            'roi_percent': -100.0,
+            'total_bets': 0,
+            'total_profit': 0.0,
+            'accuracy': 0.0,
+            'total_predictions': 0,
+            'bet_events': []
+        }
     
     roi = (total_profit / total_bets) if total_bets > 0 else -1.0
     
@@ -281,7 +262,6 @@ Examples:
         
         # Display 5 random betting events to validate ROI
         if roi_metrics['bet_events'] and len(roi_metrics['bet_events']) > 0:
-            import random
             print("\n" + "="*60)
             print("SAMPLE OF 5 RANDOM BETTING EVENTS")
             print("="*60)
