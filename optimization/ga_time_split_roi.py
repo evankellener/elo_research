@@ -28,10 +28,16 @@ from elo.elo_utils import latest_ratings_from_trained_df
 
 def calculate_roi_from_predictions(df, confidence_threshold=50):
     """
-    Calculate ROI from Elo-based predictions.
+    Calculate ROI from Elo-based predictions, evaluating on the full list of valid fights.
     
-    Simple ROI calculation: bet on the fighter with higher Elo if the difference
-    exceeds the threshold. Assume even odds (1:1) if no odds data available.
+    Per elo_explanatoin.md: "the elo's should be calculated for all fights. However when 
+    the evaluations are made (accuracy, ROI, log loss, etc.) it should only be on 
+    fighter's who have had more than one fight"
+    
+    This function:
+    1. Evaluates predictions on ALL fights where both fighters have boutcount > 1
+    2. Only places bets when confidence threshold is met
+    3. Returns ROI based on bets, but tracks all predictions for accuracy
     
     Args:
         df: DataFrame with precomp_elo, opp_precomp_elo, result columns
@@ -42,6 +48,8 @@ def calculate_roi_from_predictions(df, confidence_threshold=50):
     """
     total_bets = 0
     total_profit = 0
+    total_predictions = 0  # Track all valid predictions
+    correct_predictions = 0  # Track accuracy on all predictions
     
     for _, row in df.iterrows():
         if pd.isna(row['result']) or row['result'] not in (0, 1):
@@ -58,15 +66,22 @@ def calculate_roi_from_predictions(df, confidence_threshold=50):
         if pd.isna(bout1) or pd.isna(bout2) or bout1 <= 1 or bout2 <= 1:
             continue
         
+        # Skip if Elos are equal (can't make a prediction)
+        if elo1 == elo2:
+            continue
+        
+        # Track ALL predictions on valid fights (per elo_explanatoin.md)
+        predicted_winner = 1 if elo1 > elo2 else 0
+        actual_winner = int(row['result'])
+        total_predictions += 1
+        if predicted_winner == actual_winner:
+            correct_predictions += 1
+        
         elo_diff = abs(elo1 - elo2)
         
         # Only bet if confidence threshold is met
         if elo_diff < confidence_threshold:
             continue
-        
-        # Bet on the fighter with higher Elo
-        predicted_winner = 1 if elo1 > elo2 else 0
-        actual_winner = int(row['result'])
         
         # Assume unit bet with even odds (1:1 payout)
         # If we win, we gain 1 unit. If we lose, we lose 1 unit.
@@ -77,6 +92,8 @@ def calculate_roi_from_predictions(df, confidence_threshold=50):
         
         total_bets += 1
     
+    # Return ROI even if no bets (0.0)
+    # This ensures the GA evaluates fitness across all valid fights, not just bets
     if total_bets == 0:
         return 0.0
     
