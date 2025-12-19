@@ -39,6 +39,7 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
     total_profit = 0.0
     total_bets = 0
     bet_events = []  # Track individual betting events
+    all_fights = []  # Track ALL fights in validation set (for event display)
     predictions = []
     actuals = []
     
@@ -71,6 +72,24 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         # Use prediction confidence to determine if we should bet
         confidence = abs(pred_prob - 0.5) * 2  # Scale to 0-1 range (0 = unsure, 1 = certain)
         
+        # Store all fight information (whether bet or not)
+        fight_info = {
+            'event_name': row.get('EVENT', 'Unknown Event'),
+            'event_date': row.get('DATE', None),
+            'fighter': row.get('FIGHTER', 'Unknown'),
+            'opponent': row.get('opp_FIGHTER', 'Unknown'),
+            'fighter_elo': row.get('precomp_elo', 0),
+            'opponent_elo': row.get('opp_precomp_elo', 0),
+            'pred_prob': pred_prob,
+            'confidence': confidence,
+            'predicted_winner': 1 if pred_prob > 0.5 else 0,
+            'actual_winner': int(row["result"]),
+            'bet_placed': False,
+            'won_bet': None,
+            'payout_multiplier': None,
+            'profit': None
+        }
+        
         # Check if confidence exceeds threshold (scaled to match Elo-equivalent units)
         if confidence * CONFIDENCE_SCALE_FACTOR >= confidence_threshold:
             # Determine predicted winner and their win probability
@@ -95,7 +114,15 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
             
             total_bets += 1
             
-            # Store bet event details
+            # Update fight info with bet details
+            fight_info.update({
+                'bet_placed': True,
+                'won_bet': won_bet,
+                'payout_multiplier': payout_multiplier,
+                'profit': profit
+            })
+            
+            # Store bet event details (for backward compatibility)
             bet_events.append({
                 'event_name': row.get('EVENT', 'Unknown Event'),
                 'event_date': row.get('DATE', None),
@@ -112,6 +139,9 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
                 'profit': profit,
                 'event_roi': profit  # Same as profit, kept for semantic clarity when displaying ROI
             })
+        
+        # Add to all fights list
+        all_fights.append(fight_info)
     
     if len(predictions) == 0:
         # Return worst possible ROI when no valid predictions
@@ -123,7 +153,8 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
             'total_profit': 0.0,
             'accuracy': 0.0,
             'total_predictions': 0,
-            'bet_events': []
+            'bet_events': [],
+            'all_fights': []
         }
     
     roi = (total_profit / total_bets) if total_bets > 0 else -1.0
@@ -142,7 +173,8 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         'total_wagered': float(total_bets),
         'accuracy': accuracy,
         'total_predictions': len(predictions_arr),
-        'bet_events': bet_events
+        'bet_events': bet_events,
+        'all_fights': all_fights
     }
 
 def main():
@@ -266,16 +298,23 @@ Examples:
         print(f"Prediction Accuracy: {roi_metrics['accuracy']*100:.2f}%")
         
         # Display 5 random betting events to validate ROI
-        if roi_metrics['bet_events']:
+        if roi_metrics['all_fights']:
             print("\n" + "="*60)
             print("SAMPLE OF 5 RANDOM BETTING EVENTS")
             print("="*60)
             
-            # Group bet events by UFC event name
-            events_by_name = defaultdict(list)
-            for bet_event in roi_metrics['bet_events']:
-                event_name = bet_event['event_name']
-                events_by_name[event_name].append(bet_event)
+            # Group all fights by UFC event name
+            # Create unique fight identifiers to avoid showing same fight twice (once per fighter row)
+            events_by_name = defaultdict(lambda: {})
+            for fight in roi_metrics['all_fights']:
+                event_name = fight['event_name']
+                # Create a unique fight key using sorted fighter names
+                fighters_sorted = tuple(sorted([fight['fighter'], fight['opponent']]))
+                fight_key = fighters_sorted
+                
+                # Only add if we haven't seen this fight yet, or if this one has a bet placed
+                if fight_key not in events_by_name[event_name] or fight['bet_placed']:
+                    events_by_name[event_name][fight_key] = fight
             
             # Select up to 5 random UFC events
             event_names = list(events_by_name.keys())
@@ -283,12 +322,13 @@ Examples:
             sample_event_names = random.sample(event_names, num_samples)
             
             for i, event_name in enumerate(sample_event_names, 1):
-                fights_in_event = events_by_name[event_name]
+                fights_dict = events_by_name[event_name]
+                fights_in_event = list(fights_dict.values())
                 
-                # Calculate event-level statistics
-                event_total_bets = len(fights_in_event)
-                event_wins = sum(1 for f in fights_in_event if f['won_bet'])
-                event_profit = sum(f['profit'] for f in fights_in_event)
+                # Calculate event-level statistics (only for fights with bets)
+                event_total_bets = sum(1 for f in fights_in_event if f['bet_placed'])
+                event_wins = sum(1 for f in fights_in_event if f['bet_placed'] and f['won_bet'])
+                event_profit = sum(f['profit'] for f in fights_in_event if f['bet_placed'])
                 event_roi = (event_profit / event_total_bets * 100) if event_total_bets > 0 else 0.0
                 
                 # Get event date from first fight
@@ -297,8 +337,9 @@ Examples:
                 print(f"\n{'='*60}")
                 print(f"Event {i}: {event_name}")
                 print(f"Date: {event_date}")
-                print(f"Total Bets: {event_total_bets} | Wins: {event_wins} | Losses: {event_total_bets - event_wins}")
-                print(f"Event Profit: ${event_profit:.2f} | Event ROI: {event_roi:.2f}%")
+                print(f"Total Fights: {len(fights_in_event)} | Total Bets: {event_total_bets} | Wins: {event_wins} | Losses: {event_total_bets - event_wins}")
+                if event_total_bets > 0:
+                    print(f"Event Profit: ${event_profit:.2f} | Event ROI: {event_roi:.2f}%")
                 print(f"{'='*60}")
                 
                 # Display each fight in the event
@@ -317,21 +358,33 @@ Examples:
                     
                     print(f"    Predicted Winner: {predicted_fighter} ({pred_prob_display:.1f}% win probability)")
                     print(f"    Betting Confidence: {fight['confidence']*100:.1f}%")
-                    print(f"    Payout Odds: {fight['payout_multiplier']:.2f}x (bet $1 to win ${fight['payout_multiplier']:.2f})")
                     
-                    # Show actual outcome
-                    if fight['actual_winner'] == 1:
-                        actual_winner_name = fight['fighter']
+                    # Show bet information if bet was placed
+                    if fight['bet_placed']:
+                        print(f"    Payout Odds: {fight['payout_multiplier']:.2f}x (bet $1 to win ${fight['payout_multiplier']:.2f})")
+                        
+                        # Show actual outcome
+                        if fight['actual_winner'] == 1:
+                            actual_winner_name = fight['fighter']
+                        else:
+                            actual_winner_name = fight['opponent']
+                        print(f"    Actual Winner: {actual_winner_name}")
+                        
+                        # Show bet result
+                        if fight['won_bet']:
+                            print(f"    Result: WON - Profit: ${fight['profit']:.2f}")
+                        else:
+                            print(f"    Result: LOST - Loss: ${abs(fight['profit']):.2f}")
+                        print(f"    Fight ROI: {fight['profit']*100:.2f}%")
                     else:
-                        actual_winner_name = fight['opponent']
-                    print(f"    Actual Winner: {actual_winner_name}")
-                    
-                    # Show bet result
-                    if fight['won_bet']:
-                        print(f"    Result: WON - Profit: ${fight['profit']:.2f}")
-                    else:
-                        print(f"    Result: LOST - Loss: ${abs(fight['profit']):.2f}")
-                    print(f"    Fight ROI: {fight['event_roi']*100:.2f}%")
+                        # No bet placed - show why
+                        # Show actual outcome
+                        if fight['actual_winner'] == 1:
+                            actual_winner_name = fight['fighter']
+                        else:
+                            actual_winner_name = fight['opponent']
+                        print(f"    Actual Winner: {actual_winner_name}")
+                        print(f"    Bet Status: NO BET (confidence below threshold)")
             
             print("\n" + "="*60)
         
