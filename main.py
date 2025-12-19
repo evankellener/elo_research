@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import argparse
 import random
+from collections import defaultdict
 from elo.calculator import run_basic_elo, run_basic_elo_with_mov
 from elo.visualization import display_top_n_elos, most_recent_elo, graph_fighter_elo_history
 from elo.elo_utils import add_bout_counts
@@ -94,6 +95,8 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
             
             # Store bet event details
             bet_events.append({
+                'event_name': row.get('EVENT', 'Unknown Event'),
+                'event_date': row.get('DATE', None),
                 'fighter': row.get('FIGHTER', 'Unknown'),
                 'opponent': row.get('opp_FIGHTER', 'Unknown'),
                 'fighter_elo': row.get('precomp_elo', 0),
@@ -266,40 +269,67 @@ Examples:
             print("SAMPLE OF 5 RANDOM BETTING EVENTS")
             print("="*60)
             
-            # Select up to 5 random events
-            num_samples = min(5, len(roi_metrics['bet_events']))
-            sample_events = random.sample(roi_metrics['bet_events'], num_samples)
+            # Group bet events by UFC event name
+            events_by_name = defaultdict(list)
+            for bet_event in roi_metrics['bet_events']:
+                event_name = bet_event['event_name']
+                events_by_name[event_name].append(bet_event)
             
-            for i, event in enumerate(sample_events, 1):
-                print(f"\nEvent {i}:")
-                print(f"  Match: {event['fighter']} vs {event['opponent']}")
-                print(f"  Elo Ratings: {event['fighter_elo']:.1f} vs {event['opponent_elo']:.1f}")
+            # Select up to 5 random UFC events
+            event_names = list(events_by_name.keys())
+            num_samples = min(5, len(event_names))
+            sample_event_names = random.sample(event_names, num_samples)
+            
+            for i, event_name in enumerate(sample_event_names, 1):
+                fights_in_event = events_by_name[event_name]
                 
-                # Show who was predicted to win
-                if event['predicted_winner'] == 1:
-                    predicted_fighter = event['fighter']
-                    pred_prob_display = event['pred_prob'] * 100
-                else:
-                    predicted_fighter = event['opponent']
-                    pred_prob_display = (1 - event['pred_prob']) * 100
+                # Calculate event-level statistics
+                event_total_bets = len(fights_in_event)
+                event_wins = sum(1 for f in fights_in_event if f['won_bet'])
+                event_profit = sum(f['profit'] for f in fights_in_event)
+                event_roi = (event_profit / event_total_bets * 100) if event_total_bets > 0 else 0.0
                 
-                print(f"  Predicted Winner: {predicted_fighter} ({pred_prob_display:.1f}% win probability)")
-                print(f"  Betting Confidence: {event['confidence']*100:.1f}%")
-                print(f"  Payout Odds: {event['payout_multiplier']:.2f}x (bet $1 to win ${event['payout_multiplier']:.2f})")
+                # Get event date from first fight
+                event_date = fights_in_event[0].get('event_date', 'Unknown Date')
                 
-                # Show actual outcome
-                if event['actual_winner'] == 1:
-                    actual_winner_name = event['fighter']
-                else:
-                    actual_winner_name = event['opponent']
-                print(f"  Actual Winner: {actual_winner_name}")
+                print(f"\n{'='*60}")
+                print(f"Event {i}: {event_name}")
+                print(f"Date: {event_date}")
+                print(f"Total Bets: {event_total_bets} | Wins: {event_wins} | Losses: {event_total_bets - event_wins}")
+                print(f"Event Profit: ${event_profit:.2f} | Event ROI: {event_roi:.2f}%")
+                print(f"{'='*60}")
                 
-                # Show bet result
-                if event['won_bet']:
-                    print(f"  Result: WON - Profit: ${event['profit']:.2f}")
-                else:
-                    print(f"  Result: LOST - Loss: ${abs(event['profit']):.2f}")
-                print(f"  Event ROI: {event['event_roi']*100:.2f}%")
+                # Display each fight in the event
+                for j, fight in enumerate(fights_in_event, 1):
+                    print(f"\n  Fight {j}:")
+                    print(f"    Match: {fight['fighter']} vs {fight['opponent']}")
+                    print(f"    Elo Ratings: {fight['fighter_elo']:.1f} vs {fight['opponent_elo']:.1f}")
+                    
+                    # Show who was predicted to win
+                    if fight['predicted_winner'] == 1:
+                        predicted_fighter = fight['fighter']
+                        pred_prob_display = fight['pred_prob'] * 100
+                    else:
+                        predicted_fighter = fight['opponent']
+                        pred_prob_display = (1 - fight['pred_prob']) * 100
+                    
+                    print(f"    Predicted Winner: {predicted_fighter} ({pred_prob_display:.1f}% win probability)")
+                    print(f"    Betting Confidence: {fight['confidence']*100:.1f}%")
+                    print(f"    Payout Odds: {fight['payout_multiplier']:.2f}x (bet $1 to win ${fight['payout_multiplier']:.2f})")
+                    
+                    # Show actual outcome
+                    if fight['actual_winner'] == 1:
+                        actual_winner_name = fight['fighter']
+                    else:
+                        actual_winner_name = fight['opponent']
+                    print(f"    Actual Winner: {actual_winner_name}")
+                    
+                    # Show bet result
+                    if fight['won_bet']:
+                        print(f"    Result: WON - Profit: ${fight['profit']:.2f}")
+                    else:
+                        print(f"    Result: LOST - Loss: ${abs(fight['profit']):.2f}")
+                    print(f"    Fight ROI: {fight['event_roi']*100:.2f}%")
             
             print("\n" + "="*60)
         
