@@ -313,7 +313,10 @@ Examples:
                 fight_key = fighters_sorted
                 
                 # Only add if we haven't seen this fight yet, or if this one has a bet placed
-                if fight_key not in events_by_name[event_name] or fight['bet_placed']:
+                # Prioritize fights with bets to ensure we show betting information when available
+                if fight_key not in events_by_name[event_name]:
+                    events_by_name[event_name][fight_key] = fight
+                elif fight['bet_placed'] and not events_by_name[event_name][fight_key]['bet_placed']:
                     events_by_name[event_name][fight_key] = fight
             
             # Select up to 5 random UFC events
@@ -328,7 +331,7 @@ Examples:
                 # Calculate event-level statistics (only for fights with bets)
                 event_total_bets = sum(1 for f in fights_in_event if f['bet_placed'])
                 event_wins = sum(1 for f in fights_in_event if f['bet_placed'] and f['won_bet'])
-                event_profit = sum(f['profit'] for f in fights_in_event if f['bet_placed'])
+                event_profit = sum(f['profit'] for f in fights_in_event if f['bet_placed'] and f['profit'] is not None)
                 event_roi = (event_profit / event_total_bets * 100) if event_total_bets > 0 else 0.0
                 
                 # Get event date from first fight
