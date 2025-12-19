@@ -43,3 +43,4 @@ results/
 # GA optimization output files
 ga_optimization_*.json
 ga_optimization_*.csv
+ga_optimization_*.png

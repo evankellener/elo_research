@@ -140,6 +140,37 @@ class TestGAVisualization(unittest.TestCase):
             show_plot=False
         )
         self.assertIsNotNone(fig)
+    
+    def test_invalid_genes_handling(self):
+        """Test that invalid genes in best_genes are handled gracefully."""
+        invalid_df = pd.DataFrame({
+            'generation': [1, 2, 3],
+            'best_fitness': [0.5, 0.55, 0.58],
+            'avg_fitness': [0.45, 0.50, 0.52],
+            'worst_fitness': [0.35, 0.40, 0.42],
+            'best_genes': [
+                {'k': 100, 'denominator': 400},
+                None,  # Invalid: None instead of dict
+                'invalid'  # Invalid: string instead of dict
+            ]
+        })
+        
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+            tmp_path = tmp.name
+        
+        try:
+            # Should not raise an exception
+            fig = plot_ga_optimization_history(
+                invalid_df,
+                optimize_for='accuracy',
+                save_path=tmp_path,
+                show_plot=False
+            )
+            self.assertIsNotNone(fig)
+            self.assertTrue(os.path.exists(tmp_path))
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
 
 if __name__ == '__main__':

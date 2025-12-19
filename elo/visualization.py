@@ -88,8 +88,13 @@ def plot_ga_optimization_history(history_df, optimize_for="accuracy", save_path=
     denominator_values = []
     for _, row in history_df.iterrows():
         genes = row['best_genes']
-        k_values.append(genes.get('k', np.nan))
-        denominator_values.append(genes.get('denominator', np.nan))
+        # Validate that genes is a dictionary before accessing
+        if isinstance(genes, dict):
+            k_values.append(genes.get('k', np.nan))
+            denominator_values.append(genes.get('denominator', np.nan))
+        else:
+            k_values.append(np.nan)
+            denominator_values.append(np.nan)
     
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
@@ -171,7 +176,7 @@ def plot_ga_optimization_history(history_df, optimize_for="accuracy", save_path=
     ax2.legend(lines, labels, loc='best', fontsize=11, framealpha=0.9)
     
     # Add final parameter values as text
-    if len(generations) > 0:
+    if len(generations) > 0 and len(k_values) > 0 and not np.isnan(k_values[-1]):
         final_k = k_values[-1]
         final_denom = denominator_values[-1]
         ax2.text(0.02, 0.98, f'Final K: {final_k:.2f}\nFinal Denom: {final_denom:.2f}',

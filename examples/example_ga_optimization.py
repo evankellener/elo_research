@@ -339,7 +339,7 @@ def example_basic_optimization(optimize_for="accuracy"):
     # Generate and save visualization plots
     print("\nGenerating optimization visualization...")
     try:
-        history_df = ga.get_history_dataframe()
+        # Reuse history_df from above to avoid redundant computation
         plot_filename = f"ga_optimization_{optimize_for}_{timestamp}.png"
         plot_ga_optimization_history(
             history_df, 
