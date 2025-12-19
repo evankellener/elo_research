@@ -506,7 +506,7 @@ def create_elo_fitness_function(
                 continue
             
             # Check bout counts
-            # Both fighters must have more than one fight (as per elo_explanatoin.md)
+            # Both fighters must have more than one fight (as specified in elo_explanatoin.md)
             bout1 = row.get("precomp_boutcount", 0)
             bout2 = row.get("opp_precomp_boutcount", 0)
             if pd.isna(bout1) or pd.isna(bout2) or bout1 <= 1 or bout2 <= 1:

@@ -53,7 +53,7 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         
         # Check bout counts (same as GA optimization)
         # Filter to only include fights where both fighters have had more than one fight
-        # (as per elo_explanatoin.md: "more than one fight")
+        # (as specified in elo_explanatoin.md: "more than one fight")
         if use_bout_filter:
             bout1 = row.get("precomp_boutcount", 0)
             bout2 = row.get("opp_precomp_boutcount", 0)
