@@ -51,11 +51,15 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
         if row.get("precomp_elo") == row.get("opp_precomp_elo"):
             continue
         
-        # Check bout counts (same as GA optimization)
+        # Check bout counts - require at least one fighter to have prior history
         if use_bout_filter:
             bout1 = row.get("precomp_boutcount", 0)
             bout2 = row.get("opp_precomp_boutcount", 0)
-            if pd.isna(bout1) or pd.isna(bout2) or bout1 < 1 or bout2 < 1:
+            # Convert to numeric if needed
+            bout1 = 0 if pd.isna(bout1) else bout1
+            bout2 = 0 if pd.isna(bout2) else bout2
+            # Require at least one fighter to have prior history
+            if bout1 < 1 and bout2 < 1:
                 continue
         
         # Calculate prediction probability
@@ -245,7 +249,7 @@ Examples:
         print(f"Confidence Threshold: {args.confidence_threshold:.2f}")
         print(f"Validation Split: Last {(1-args.validation_percentile)*100:.0f}% of data")
         if args.use_ga_setup:
-            print("Using GA setup: Filtering by bout counts (both fighters must have prior history)")
+            print("Using GA setup: Filtering by bout counts (at least one fighter must have prior history)")
         print("="*60)
         
         roi_metrics = calculate_roi(
