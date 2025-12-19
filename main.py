@@ -105,7 +105,7 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
                 'won_bet': won_bet,
                 'payout_multiplier': payout_multiplier,
                 'profit': profit,
-                'event_roi': profit  # profit on $1 bet
+                'event_roi': profit  # ROI as decimal (e.g., 0.88 = 88% ROI)
             })
     
     if len(predictions) == 0:
@@ -283,8 +283,8 @@ Examples:
                     predicted_fighter = event['opponent']
                     pred_prob_display = (1 - event['pred_prob']) * 100
                 
-                print(f"  Predicted Winner: {predicted_fighter} ({pred_prob_display:.1f}% confidence)")
-                print(f"  Confidence Level: {event['confidence']*100:.1f}%")
+                print(f"  Predicted Winner: {predicted_fighter} ({pred_prob_display:.1f}% win probability)")
+                print(f"  Betting Confidence: {event['confidence']*100:.1f}%")
                 print(f"  Payout Odds: {event['payout_multiplier']:.2f}x (bet $1 to win ${event['payout_multiplier']:.2f})")
                 
                 # Show actual outcome
