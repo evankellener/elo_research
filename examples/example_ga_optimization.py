@@ -55,7 +55,8 @@ def test_out_of_sample_metrics(
         test_df: Test DataFrame (past3_events.csv)
         denominator: Denominator parameter for probability calculation
         base_elo: Base Elo rating for new fighters
-        confidence_threshold: Threshold for making betting decisions (for ROI)
+        confidence_threshold: DEPRECATED - No longer used. Bets are placed on all valid fights.
+                            Kept for backward compatibility.
         optimize_for: Metric to optimize for ("accuracy", "roi", "log_loss")
         verbose: Whether to print verbose output
         

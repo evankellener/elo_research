@@ -471,6 +471,8 @@ def create_elo_fitness_function(
         # Extract parameters with defaults
         k = params.get("k", 32)
         denominator = params.get("denominator", 400)
+        # confidence_threshold is deprecated - bets are now placed on all valid fights
+        # Kept for backward compatibility with existing parameter sets
         confidence_threshold = params.get("confidence_threshold", 50)
         
         # MOV weights (use defaults if not in params)

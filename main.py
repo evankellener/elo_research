@@ -24,7 +24,8 @@ def calculate_roi(df, denominator=400, confidence_threshold=50, validation_perce
     Args:
         df: DataFrame with fight data including precomp_elo columns
         denominator: Elo denominator for calculating win probabilities
-        confidence_threshold: Minimum confidence threshold for betting (default 50)
+        confidence_threshold: DEPRECATED - No longer used. Bets are placed on all valid fights.
+                            Kept for backward compatibility.
         validation_percentile: Use fights after this percentile for validation (default 0.8)
         use_bout_filter: If True, filter out fights where either fighter has no prior history (default False)
     
@@ -201,7 +202,7 @@ Examples:
     parser.add_argument('--show-roi', action='store_true',
                         help='Calculate and display ROI metrics')
     parser.add_argument('--confidence-threshold', type=float, default=50.0,
-                        help='Confidence threshold for betting in ROI calculation (default: 50.0)')
+                        help='[DEPRECATED - No longer used] Confidence threshold for betting in ROI calculation (default: 50.0). Bets are now placed on all valid fights.')
     parser.add_argument('--validation-percentile', type=float, default=0.8,
                         help='Percentile for validation split in ROI calculation (default: 0.8)')
     parser.add_argument('--use-ga-setup', action='store_true',
@@ -267,7 +268,7 @@ Examples:
         print("\n" + "="*60)
         print("ROI CALCULATION")
         print("="*60)
-        print(f"Confidence Threshold: {args.confidence_threshold:.2f}")
+        print(f"Confidence Threshold: {args.confidence_threshold:.2f} [DEPRECATED - Not used, bets placed on all valid fights]")
         print(f"Validation Split: Last {(1-args.validation_percentile)*100:.0f}% of data")
         if args.use_ga_setup:
             print("Using GA setup: Filtering by bout counts (both fighters must have prior history)")
