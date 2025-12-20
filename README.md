@@ -550,9 +550,9 @@ Traditional grid search over K-factor tests ~50 values in a 1D space. To similar
 **Performance Comparison:**
 
 Based on testing with the MMA dataset:
-- Grid search (K only): Best accuracy ~58.6% (K=170)
+- Grid search (K only): Best accuracy ~59.2% (K=170)
 - GA optimization (K + denominator): Best accuracy ~61.4% (K=72, denom=436)
-- **Improvement: +2.8% absolute, +4.8% relative**
+- **Improvement: +2.2% absolute, +3.7% relative**
 
 The GA explores unconventional parameter combinations (like lower K with higher denominator) that grid search would never test, leading to better generalization.
 
