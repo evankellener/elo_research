@@ -468,22 +468,22 @@ We compared the Elo rating system with and without Method of Victory weights to 
 
 **WITH MOV:**
 - Best K: 170
-- Best Test Accuracy: 0.5915
-- OOS Accuracy (at best K): 0.6026
-- **ROI (using market odds): -0.54%** *(nearly break-even)*
+- Best Test Accuracy: 0.5861
+- OOS Accuracy (at best K): 0.6053
+- **ROI (using market odds): -0.54%**
 
 **WITHOUT MOV:**
 - Best K: 250
-- Best Test Accuracy: 0.5841
-- OOS Accuracy (at best K): 0.5897
+- Best Test Accuracy: 0.5789
+- OOS Accuracy (at best K): 0.5789
 - **ROI (using market odds): -1.48%**
 
 **MOV Improvement:**
-- Test Accuracy: +0.0074 (1.3% improvement)
-- OOS Accuracy: +0.0129 (2.2% improvement)
+- Test Accuracy: +0.0072 (1.2% improvement)
+- OOS Accuracy: +0.0264 (4.6% improvement)
 - **ROI: +0.94% absolute (63.6% relative improvement)**
 
-The results show that incorporating Method of Victory weights provides meaningful improvements across all metrics. **Most significantly, MOV improves betting profitability by 63.6% relative to the baseline, bringing performance nearly to break-even (-0.54% ROI) when using actual market betting odds.** The improved accuracy and calibration also enhance generalization to future fights.
+The results show that incorporating Method of Victory weights provides meaningful improvements, particularly in out-of-sample accuracy, demonstrating better generalization to future fights. **Most significantly for betting applications, MOV improves ROI by 63.6% relative to the baseline when using actual market odds.**
 
 #### K Parameter Optimization and MOV Comparison
 
@@ -519,8 +519,8 @@ The visualization consists of four subplots comparing MOV vs No MOV across diffe
 **Key Takeaways:**
 - MOV has minimal impact on overall accuracy but provides meaningful improvements in test and out-of-sample accuracy
 - The optimal K value differs: MOV performs best at K=170, while No MOV performs best at K=250
-- MOV is particularly effective for predicting truly unseen events (out-of-sample), achieving up to 60% accuracy compared to No MOV's ~59%
-- The improvement is most pronounced in the K range of 150-200, where MOV maintains consistently better OOS accuracy
+- MOV is particularly effective for predicting truly unseen events (out-of-sample), achieving up to 63% accuracy compared to No MOV's peak of ~60%
+- The improvement is most pronounced in the K range of 180-280, where MOV maintains high OOS accuracy while No MOV experiences a performance dip
 
 ### Genetic Algorithm vs Grid Search
 
@@ -553,9 +553,9 @@ Traditional grid search over K-factor tests ~50 values in a 1D space. To similar
 **Performance Comparison:**
 
 Based on testing with the MMA dataset:
-- Grid search (K only): Best accuracy ~59.2% (K=170)
+- Grid search (K only): Best accuracy ~58.6% (K=170)
 - GA optimization (K + denominator): Best accuracy ~61.4% (K=72, denom=436)
-- **Improvement: +2.2% absolute, +3.7% relative**
+- **Improvement: +2.8% absolute, +4.8% relative**
 
 The GA explores unconventional parameter combinations (like lower K with higher denominator) that grid search would never test, leading to better generalization.
 
