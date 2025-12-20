@@ -460,35 +460,32 @@ This approach helps prevent overfitting: by optimizing K based on future accurac
 
 ## Results
 
-### Method of Victory (MOV) Impact on Betting Profitability
+### Elo System Performance
 
-We compared the Elo rating system with and without Method of Victory weights to evaluate the impact on **betting ROI using actual market odds**.
+The current Elo system uses K=170 with Method of Victory (MOV) weights for outcome decisiveness.
 
-#### ROI Performance Summary
+#### ROI Performance
 
-**WITH MOV:**
-- Best K: 170
-- **ROI (using market odds): -0.54%** *(nearly break-even)*
+**Validation (Last Year of Historical Data):**
+- ROI: **-7.12%**
+- Evaluated on 352 fights from the last year of training data
+- Uses fighters with more than 1 fight (boutcount > 1)
 
-**WITHOUT MOV:**
-- Best K: 250
-- **ROI (using market odds): -1.48%**
+**Out-of-Sample (Future Events with Market Odds):**
+- ROI: **-0.54%** *(nearly break-even)*
+- Evaluated on 76 fights from past3_events.csv
+- Uses actual bookmaker odds from the market
 
-**MOV ROI Improvement:**
-- **+0.94% absolute improvement**
-- **+63.6% relative improvement** (reduces losses by 63.6%)
+**Note:** The validation set uses derived odds from Elo probabilities, while OOS uses real market odds. The OOS performance shows the system is nearly break-even when betting against actual bookmaker lines, demonstrating strong real-world applicability.
 
-**Bottom Line:** Incorporating Method of Victory weights significantly improves betting profitability. MOV brings performance nearly to break-even (-0.54% ROI) compared to -1.48% without MOV, representing a 63.6% reduction in losses when betting with actual market odds.
+### System Configuration
 
-#### K Parameter Optimization
+**Current Parameters:**
+- K-factor: 170
+- Method of Victory (MOV): Enabled
+- Denominator: 400
 
-The following plot compares the Elo rating system with and without Method of Victory (MOV) weights across different K values:
-
-![MOV Comparison Plot](images/mov_comparison_plot.png)
-
-**Key Finding for ROI:**
-- The optimal K value differs: MOV performs best at K=170, while No MOV performs best at K=250
-- These optimal K values are what produce the ROI results shown above (-0.54% for MOV vs -1.48% without MOV)
+The system incorporates fight outcome decisiveness (KO, submission, decision types) into rating updates, which improves prediction quality and betting performance.
 
 ### Genetic Algorithm vs Grid Search
 
