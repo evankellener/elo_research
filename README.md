@@ -460,23 +460,47 @@ This approach helps prevent overfitting: by optimizing K based on future accurac
 
 ## Results
 
-### Elo System Performance
+### Comprehensive Performance Analysis: With vs Without MOV
 
-The current Elo system uses K=170 with Method of Victory (MOV) weights for outcome decisiveness.
+The current Elo system uses K=170 with Method of Victory (MOV) weights. Below is a complete comparison against the baseline system without MOV (K=250).
 
-#### ROI Performance
+#### Performance Metrics
 
-**Validation (Last Year of Historical Data):**
-- ROI: **-7.12%**
-- Evaluated on 352 fights from the last year of training data
-- Uses fighters with more than 1 fight (boutcount > 1)
+| Metric | WITH MOV (K=170) | WITHOUT MOV (K=250) | Difference | Better? |
+|--------|------------------|---------------------|------------|---------|
+| **Validation (Last Year - 352 fights)** |
+| Accuracy | 60.23% | 60.51% | -0.28% | ❌ |
+| Log Loss | 0.6787 | 0.7059 | -0.0272 | ✓ |
+| Brier Score | 0.2424 | 0.2518 | -0.0094 | ✓ |
+| **ROI** | **-7.12%** | **-9.43%** | **+2.31%** | **✓** |
+| **Out-of-Sample (76 fights, market odds)** |
+| Accuracy | 53.95% | 53.95% | +0.00% | → |
+| Log Loss | 0.8452 | 0.9473 | -0.1021 | ✓ |
+| Brier Score | 0.2898 | 0.3127 | -0.0229 | ✓ |
+| **ROI** | **-9.63%** | **-9.96%** | **+0.33%** | **✓** |
 
-**Out-of-Sample (Future Events with Market Odds):**
-- ROI: **-0.54%** *(nearly break-even)*
-- Evaluated on 76 fights from past3_events.csv
-- Uses actual bookmaker odds from the market
+**Note:** Lower is better for Log Loss and Brier Score. Higher is better for Accuracy and ROI.
 
-**Note:** The validation set uses derived odds from Elo probabilities, while OOS uses real market odds. The OOS performance shows the system is nearly break-even when betting against actual bookmaker lines, demonstrating strong real-world applicability.
+#### Key Findings
+
+**MOV Impact on Validation Set:**
+- **Improves 3 of 4 metrics** (Log Loss, Brier Score, ROI)
+- **ROI improvement: +2.31%** (24.5% relative improvement)
+- Slightly lower accuracy but better calibration and profitability
+
+**MOV Impact on Out-of-Sample:**
+- **Improves 3 of 4 metrics** (Log Loss, Brier Score, ROI)
+- **ROI improvement: +0.33%** (3.3% relative improvement)
+- Same accuracy but significantly better probability calibration
+- Better calibration translates to better betting decisions
+
+**Overall Assessment:**
+Method of Victory weights enhance the system's performance, particularly in:
+1. **Probability calibration** (lower log loss and Brier score)
+2. **Betting profitability** (higher ROI on both validation and OOS)
+3. **Generalization** (improvements consistent across different evaluation sets)
+
+The slightly lower accuracy with MOV is offset by substantially better probability estimates, which are more important for profitable betting than raw accuracy.
 
 ### System Configuration
 
