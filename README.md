@@ -502,6 +502,32 @@ Method of Victory weights enhance the system's performance, particularly in:
 
 The slightly lower accuracy with MOV is offset by substantially better probability estimates, which are more important for profitable betting than raw accuracy.
 
+### Calibration Optimization Experiment
+
+To test whether optimizing for calibration metrics (Sharpe ratio, ECE, Brier score) can improve generalization and reduce the validation-OOS gap, we ran two genetic algorithm optimizations:
+
+#### Experiment Setup
+- **Standard Optimization**: Equal weights on accuracy, log loss, Brier score, and ROI
+- **Calibration-Focused**: Emphasized calibration (15% accuracy, 25% log loss, 30% Brier, 30% ROI) + bonus for Sharpe ratio, ECE, and calibration metrics
+
+#### Results
+
+| Approach | K | Denom | Val ROI | OOS ROI | Val-OOS Gap |
+|----------|---|-------|---------|---------|-------------|
+| **Standard** | 75.8 | 446.4 | -0.53% | -4.54% | **4.01%** |
+| **Calibration-Focused** | 81.8 | 485.1 | -0.46% | -4.54% | **4.09%** |
+
+**Finding**: Calibration-focused optimization did not reduce the validation-OOS gap in this experiment (4.09% vs 4.01%). Both approaches achieved similar calibration metrics:
+- Log Loss: ~0.669 (val) vs ~0.724 (OOS)
+- Brier Score: ~0.239 (val) vs ~0.262 (OOS)
+
+**Analysis**: The val-OOS gap appears to be inherent to the data distribution differences between historical and future events, rather than an optimization artifact. The similar performance suggests:
+1. Both optimizations found well-calibrated solutions
+2. The gap reflects genuine differences between validation and OOS fight characteristics
+3. Further improvements may require different features or modeling approaches rather than just calibration tuning
+
+**Note**: This experiment used smaller population sizes (20) and fewer generations (30) for faster results. Larger-scale optimization might yield different insights.
+
 ### System Configuration
 
 **Current Parameters:**
