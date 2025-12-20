@@ -468,17 +468,17 @@ We compared the Elo rating system with and without Method of Victory weights to 
 
 **WITH MOV:**
 - Best K: 170
-- Best Test Accuracy: 0.5861
-- OOS Accuracy (at best K): 0.6053
+- Best Test Accuracy: 0.5915
+- OOS Accuracy (at best K): 0.6026
 
 **WITHOUT MOV:**
 - Best K: 250
-- Best Test Accuracy: 0.5789
-- OOS Accuracy (at best K): 0.5789
+- Best Test Accuracy: 0.5841
+- OOS Accuracy (at best K): 0.5897
 
 **MOV Improvement:**
-- Test Accuracy: +0.0072 (1.2% improvement)
-- OOS Accuracy: +0.0264 (4.6% improvement)
+- Test Accuracy: +0.0074 (1.3% improvement)
+- OOS Accuracy: +0.0129 (2.2% improvement)
 
 The results show that incorporating Method of Victory weights provides meaningful improvements, particularly in out-of-sample accuracy, demonstrating better generalization to future fights.
 
@@ -516,8 +516,8 @@ The visualization consists of four subplots comparing MOV vs No MOV across diffe
 **Key Takeaways:**
 - MOV has minimal impact on overall accuracy but provides meaningful improvements in test and out-of-sample accuracy
 - The optimal K value differs: MOV performs best at K=170, while No MOV performs best at K=250
-- MOV is particularly effective for predicting truly unseen events (out-of-sample), achieving up to 63% accuracy compared to No MOV's peak of ~60%
-- The improvement is most pronounced in the K range of 180-280, where MOV maintains high OOS accuracy while No MOV experiences a performance dip
+- MOV is particularly effective for predicting truly unseen events (out-of-sample), achieving up to 60% accuracy compared to No MOV's ~59%
+- The improvement is most pronounced in the K range of 150-200, where MOV maintains consistently better OOS accuracy
 
 ### Genetic Algorithm vs Grid Search
 
