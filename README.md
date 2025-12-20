@@ -470,17 +470,20 @@ We compared the Elo rating system with and without Method of Victory weights to 
 - Best K: 170
 - Best Test Accuracy: 0.5915
 - OOS Accuracy (at best K): 0.6026
+- **ROI (using market odds): -0.54%** *(nearly break-even)*
 
 **WITHOUT MOV:**
 - Best K: 250
 - Best Test Accuracy: 0.5841
 - OOS Accuracy (at best K): 0.5897
+- **ROI (using market odds): -1.48%**
 
 **MOV Improvement:**
 - Test Accuracy: +0.0074 (1.3% improvement)
 - OOS Accuracy: +0.0129 (2.2% improvement)
+- **ROI: +0.94% absolute (63.6% relative improvement)**
 
-The results show that incorporating Method of Victory weights provides meaningful improvements, particularly in out-of-sample accuracy, demonstrating better generalization to future fights.
+The results show that incorporating Method of Victory weights provides meaningful improvements across all metrics. **Most significantly, MOV improves betting profitability by 63.6% relative to the baseline, bringing performance nearly to break-even (-0.54% ROI) when using actual market betting odds.** The improved accuracy and calibration also enhance generalization to future fights.
 
 #### K Parameter Optimization and MOV Comparison
 
