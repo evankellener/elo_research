@@ -16,6 +16,42 @@ from elo.elo_utils import apply_multiphase_decay
 import json
 from datetime import datetime
 
+def american_odds_to_decimal(odds):
+    """
+    Convert American odds to decimal odds.
+    
+    American odds format:
+    - Positive odds (e.g., +150): Profit from a $100 bet. +150 means win $150 on $100.
+      Decimal = (odds / 100) + 1 = (150/100) + 1 = 2.50
+    - Negative odds (e.g., -200): Amount to bet to win $100. -200 means bet $200 to win $100.
+      Decimal = (100 / |odds|) + 1 = (100/200) + 1 = 1.50
+    
+    Args:
+        odds: American odds value (positive or negative float, or string representation)
+    
+    Returns:
+        Decimal odds value, or None if input is NaN or cannot be converted
+    
+    Examples:
+        >>> american_odds_to_decimal(150)   # +150 underdog
+        2.5
+        >>> american_odds_to_decimal(-200)  # -200 favorite
+        1.5
+    """
+    if pd.isna(odds):
+        return None
+    
+    # Convert to float if it's a string
+    try:
+        odds = float(odds)
+    except (ValueError, TypeError):
+        return None
+    
+    if odds > 0:
+        return (odds / 100) + 1
+    else:
+        return (100 / abs(odds)) + 1
+
 def run_elo_with_decay(df, k=32, base_elo=1500, denominator=400, use_mov=True, 
                         draw_k_factor=0.5, use_decay=False, quick_succession_days=60,
                         quick_succession_bump=1.05, decay_days=365, decay_rate=0.001):
@@ -97,7 +133,7 @@ def run_elo_with_decay(df, k=32, base_elo=1500, denominator=400, use_mov=True,
     return df
 
 def calculate_oos_roi(ratings, test_df, denominator=400):
-    """Calculate OOS ROI using market odds."""
+    """Calculate OOS ROI using market odds (converts American odds to decimal)."""
     test_df = test_df[test_df['avg_odds'].notna()].copy()
     
     correct = 0
@@ -109,6 +145,13 @@ def calculate_oos_roi(ratings, test_df, denominator=400):
         
         if f1 not in ratings or f2 not in ratings:
             continue
+        
+        # Convert American odds to decimal odds
+        f1_decimal_odds = american_odds_to_decimal(row['avg_odds'])
+        f2_decimal_odds = american_odds_to_decimal(row['opp_avg_odds']) if pd.notna(row['opp_avg_odds']) else None
+        
+        if f1_decimal_odds is None:
+            continue
             
         r1, r2 = ratings[f1], ratings[f2]
         prob_f1_wins = 1 / (1 + 10**((r2 - r1) / denominator))
@@ -117,7 +160,7 @@ def calculate_oos_roi(ratings, test_df, denominator=400):
         if prob_f1_wins > 0.5:
             # Bet on f1
             if row['result'] == 1:
-                profit = row['avg_odds'] - 1
+                profit = f1_decimal_odds - 1
                 total_roi += profit
                 correct += 1
             else:
@@ -125,7 +168,10 @@ def calculate_oos_roi(ratings, test_df, denominator=400):
         else:
             # Bet on f2
             if row['result'] == 0:
-                profit = row['opp_avg_odds'] - 1 if pd.notna(row['opp_avg_odds']) else 1
+                if f2_decimal_odds is not None:
+                    profit = f2_decimal_odds - 1
+                else:
+                    profit = 1  # Fallback if no odds available
                 total_roi += profit
                 correct += 1
             else:
