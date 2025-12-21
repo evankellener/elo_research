@@ -1,0 +1,128 @@
+
+================================================================================
+COMPREHENSIVE ELO SYSTEM PERFORMANCE ANALYSIS
+================================================================================
+Analysis run at: 2025-12-21 17:58:14
+
+Loading data...
+
+================================================================================
+SECTION 1: DATA EXPLORATION
+================================================================================
+
+Training Data:
+  Total fights: 8,024
+  Date range: 1995-04-07 00:00:00 to 2025-10-11 00:00:00
+  Date span: 11,145 days (30.5 years)
+  Unique fighters: 2,490
+  Valid results (0 or 1): 8,023
+  Draws: 0
+  No contests/invalid: 1
+
+Validation Data (Last Year of Training):
+  Total fights: 508
+  Date range: 2024-10-12 00:00:00 to 2025-10-11 00:00:00
+  Date span: 364 days
+  Unique fighters: 612
+
+Out-of-Sample Test Data:
+  Total fights: 78
+  Date range: 2025-10-18 00:00:00 to 2025-11-22 00:00:00
+  Date span: 35 days
+  Unique fighters: 155
+
+Fighter Filtering Analysis (per elo_explanation.md):
+  Methodology: Only evaluate fights where BOTH fighters have boutcount > 1
+  Reason: Fighters with boutcount=1 have default Elo (1500), predictions unreliable
+  Validation fights after filter: 352 / 508 (69.3%)
+
+================================================================================
+SECTION 2: METHOD OF VICTORY (MOV) IMPACT ANALYSIS
+================================================================================
+
+Running WITH MOV (K=170)...
+
+Running WITHOUT MOV (K=250)...
+
+--------------------------------------------------------------------------------
+VALIDATION RESULTS (Last Year of Training Data)
+--------------------------------------------------------------------------------
+Metric               WITH MOV        WITHOUT MOV     Difference     
+--------------------------------------------------------------------------------
+Fights Evaluated     352             352             0              
+Accuracy              60.23%         60.51%         -0.28%
+Log Loss             0.6787         0.7059         -0.0272
+Brier Score          0.2424         0.2518         -0.0094
+ROI                   -7.12%         -9.43%         +2.31%
+Sharpe Ratio         -0.0914         -0.1241         +0.0328
+
+--------------------------------------------------------------------------------
+OUT-OF-SAMPLE RESULTS (past3_events.csv with Market Odds)
+--------------------------------------------------------------------------------
+Metric               WITH MOV        WITHOUT MOV     Difference     
+--------------------------------------------------------------------------------
+Fights Evaluated     76              76              0              
+Accuracy              60.53%         59.21%         +1.32%
+Log Loss             0.7279         0.7943         -0.0664
+Brier Score          0.2546         0.2732         -0.0186
+ROI                   -0.54%         -1.48%         +0.94%
+Sharpe Ratio         -0.0060         -0.0164         +0.0105
+
+================================================================================
+SECTION 3: CALIBRATION OPTIMIZATION EXPERIMENT
+================================================================================
+
+This experiment tests whether optimizing for calibration metrics
+(Sharpe ratio, Expected Calibration Error, Brier) reduces the
+validation-OOS generalization gap.
+
+Using smaller GA parameters for faster execution:
+  Population: 20, Generations: 30, Early stop: 10
+
+Running STANDARD optimization...
+Best parameters: K=86.55, Denominator=508.40
+
+Running CALIBRATION-FOCUSED optimization...
+Best parameters: K=80.01, Denominator=469.53
+
+--------------------------------------------------------------------------------
+CALIBRATION EXPERIMENT RESULTS
+--------------------------------------------------------------------------------
+Metric               Standard        Calibration     Difference     
+--------------------------------------------------------------------------------
+K Parameter           86.55          80.01          -6.54
+Denominator          508.40         469.53         -38.87
+
+Val ROI               -3.62%         -2.58%         +1.05%
+OOS ROI               -2.25%         -2.25%         +0.00%
+Val-OOS Gap            1.37%          0.33%         -1.05%
+
+================================================================================
+SECTION 4: SUMMARY OF FINDINGS
+================================================================================
+
+1. MOV IMPACT:
+   - MOV improves ROI by +2.31% on validation
+   - MOV improves ROI by +0.94% on OOS
+   - MOV improves calibration (lower log loss and Brier score)
+
+2. CALIBRATION OPTIMIZATION:
+   - Calibration-focused optimization REDUCES val-OOS gap by 1.05%
+
+3. DATA INTEGRITY:
+   - All 8,024 training fights used (no data excluded)
+   - Validation uses 508 fights from last year
+   - OOS uses 78 fights from future events
+   - Fighter filtering only for evaluation (boutcount > 1), not training
+
+4. EXPERIMENTAL PRECISION:
+   - Base Elo: 1500 for all experiments
+   - Evaluation follows elo_explanation.md methodology
+   - ROI calculated with derived odds (validation) and market odds (OOS)
+   - All metrics computed on same filtered dataset for fair comparison
+
+================================================================================
+ANALYSIS COMPLETE
+================================================================================
+
+Results saved to: performance_analysis_results.json

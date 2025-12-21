@@ -1,0 +1,150 @@
+{
+  "timestamp": "2025-12-21T18:09:29.109760",
+  "data_statistics": {
+    "training": {
+      "name": "Training Data (interleaved_cleaned.csv)",
+      "total_fights": 8024,
+      "date_range_start": "1995-04-07 00:00:00",
+      "date_range_end": "2025-10-11 00:00:00",
+      "date_span_days": 11145,
+      "unique_fighters": 2490,
+      "valid_results": 8023,
+      "draws": 0,
+      "no_contests": 1
+    },
+    "validation": {
+      "name": "Validation Data (Last Year)",
+      "total_fights": 508,
+      "date_range_start": "2024-10-12 00:00:00",
+      "date_range_end": "2025-10-11 00:00:00",
+      "date_span_days": 364,
+      "unique_fighters": 612,
+      "valid_results": 508,
+      "draws": 0,
+      "no_contests": 0
+    },
+    "oos": {
+      "name": "Out-of-Sample Data (past3_events.csv)",
+      "total_fights": 78,
+      "date_range_start": "2025-10-18 00:00:00",
+      "date_range_end": "2025-11-22 00:00:00",
+      "date_span_days": 35,
+      "unique_fighters": 155,
+      "valid_results": 78,
+      "draws": 0,
+      "no_contests": 0
+    }
+  },
+  "mov_impact": {
+    "validation": {
+      "with_mov": {
+        "name": "Validation (WITH MOV)",
+        "n_fights": 352,
+        "n_total_before_filter": 508,
+        "accuracy": 0.6022727272727273,
+        "log_loss": 0.6787062417510893,
+        "brier_score": 0.2423913704904983,
+        "roi": -7.1182588864155125,
+        "sharpe_ratio": -0.09139385681953975,
+        "total_profit": -25.056271280182607,
+        "avg_profit_per_bet": -0.07118258886415513
+      },
+      "without_mov": {
+        "name": "Validation (WITHOUT MOV)",
+        "n_fights": 352,
+        "n_total_before_filter": 508,
+        "accuracy": 0.6051136363636364,
+        "log_loss": 0.7059298246625569,
+        "brier_score": 0.2517835065539233,
+        "roi": -9.426577165580495,
+        "sharpe_ratio": -0.1241480591516342,
+        "total_profit": -33.181551622843344,
+        "avg_profit_per_bet": -0.09426577165580495
+      }
+    },
+    "oos": {
+      "with_mov": {
+        "name": "Out-of-Sample (Market Odds)",
+        "n_fights": 76,
+        "n_total_before_filter": 78,
+        "accuracy": 0.6052631578947368,
+        "log_loss": 0.7278828415724226,
+        "brier_score": 0.25459548738296744,
+        "roi": -0.540182566527149,
+        "sharpe_ratio": -0.005952945652549692,
+        "total_profit": -0.41053875056063327,
+        "avg_profit_per_bet": -0.0054018256652714905
+      },
+      "without_mov": {
+        "name": "Out-of-Sample (Market Odds)",
+        "n_fights": 76,
+        "n_total_before_filter": 78,
+        "accuracy": 0.5921052631578947,
+        "log_loss": 0.7943071648361957,
+        "brier_score": 0.2731926252374944,
+        "roi": -1.4836871613475338,
+        "sharpe_ratio": -0.0164163092002147,
+        "total_profit": -1.1276022426241257,
+        "avg_profit_per_bet": -0.014836871613475338
+      }
+    }
+  },
+  "calibration_experiment": {
+    "standard": {
+      "k": 86.55115482453425,
+      "denominator": 508.3994454346371,
+      "validation": {
+        "name": "Standard Optimization",
+        "n_fights": 352,
+        "n_total_before_filter": 508,
+        "accuracy": 0.5823863636363636,
+        "log_loss": 0.6704619566296119,
+        "brier_score": 0.23936094479370043,
+        "roi": -3.622706396961061,
+        "sharpe_ratio": -0.0435524025752483,
+        "total_profit": -12.751926517302936,
+        "avg_profit_per_bet": -0.03622706396961061
+      },
+      "oos": {
+        "name": "Out-of-Sample (Market Odds)",
+        "n_fights": 76,
+        "n_total_before_filter": 78,
+        "accuracy": 0.5789473684210527,
+        "log_loss": 0.6930461202522742,
+        "brier_score": 0.24863753510847952,
+        "roi": -2.2495659477371555,
+        "sharpe_ratio": -0.02396725093805737,
+        "total_profit": -1.7096701202802382,
+        "avg_profit_per_bet": -0.022495659477371557
+      }
+    },
+    "calibration_focused": {
+      "k": 80.01410275781998,
+      "denominator": 469.5295729095021,
+      "validation": {
+        "name": "Calibration Optimization",
+        "n_fights": 352,
+        "n_total_before_filter": 508,
+        "accuracy": 0.5823863636363636,
+        "log_loss": 0.6696187951917437,
+        "brier_score": 0.2389288395756717,
+        "roi": -2.577030384217247,
+        "sharpe_ratio": -0.030704288180321053,
+        "total_profit": -9.07114695244471,
+        "avg_profit_per_bet": -0.025770303842172472
+      },
+      "oos": {
+        "name": "Out-of-Sample (Market Odds)",
+        "n_fights": 76,
+        "n_total_before_filter": 78,
+        "accuracy": 0.5789473684210527,
+        "log_loss": 0.693060629886411,
+        "brier_score": 0.24864119051127997,
+        "roi": -2.2495659477371555,
+        "sharpe_ratio": -0.02396725093805737,
+        "total_profit": -1.7096701202802382,
+        "avg_profit_per_bet": -0.022495659477371557
+      }
+    }
+  }
+}
