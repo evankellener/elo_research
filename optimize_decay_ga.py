@@ -56,9 +56,12 @@ def run_elo_with_params(df, k=170, base_elo=1500, denominator=400, use_mov=True,
         r2 = apply_multiphase_decay(r2, days_since_f2, quick_succession_days,
                                    quick_succession_bump, decay_days, decay_rate)
 
-        # logistic expectation
-        e1 = 1 / (1 + 10 ** ((r2 - r1) / denominator))
-        e2 = 1 / (1 + 10 ** ((r1 - r2) / denominator))
+        # logistic expectation with overflow protection
+        rating_diff = (r2 - r1) / denominator
+        # Clip to avoid overflow in exponential
+        rating_diff = max(min(rating_diff, 100), -100)
+        e1 = 1 / (1 + 10 ** rating_diff)
+        e2 = 1 - e1
 
         # method of victory multiplier
         if use_mov:
@@ -103,18 +106,20 @@ def evaluate_decay_parameters(individual):
     quick_days, quick_bump, decay_days, decay_rate = individual
     
     # Load and prepare data
-    df = pd.read_csv('data/all_processed.csv')
+    df = pd.read_csv('data/interleaved_cleaned.csv', low_memory=False)
     df['DATE'] = pd.to_datetime(df['DATE'])
     df = df.sort_values('DATE')
+    # Ensure result is numeric
+    df['result'] = pd.to_numeric(df['result'], errors='coerce')
     
     oos_df = pd.read_csv('data/past3_events.csv')
     oos_df['DATE'] = pd.to_datetime(oos_df['date'])
     oos_df = oos_df.rename(columns={
-        'r_fighter': 'FIGHTER',
-        'b_fighter': 'opp_FIGHTER',
-        'winner': 'WIN_result'
+        'fighter': 'FIGHTER',
+        'opp_fighter': 'opp_FIGHTER'
     })
-    oos_df['result'] = oos_df['WIN_result'].apply(lambda x: 1.0 if x == 'Red' else 0.0)
+    # result column is already correct (1 for win, 0 for loss)
+    oos_df['result'] = pd.to_numeric(oos_df['result'], errors='coerce')
     
     # Split into training and validation
     last_date = df['DATE'].max()
