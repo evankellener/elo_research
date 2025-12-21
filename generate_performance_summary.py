@@ -21,10 +21,94 @@ import pandas as pd
 import numpy as np
 from datetime import timedelta
 from optimization.optimal_k_with_mov import run_basic_elo, add_bout_counts
+from elo.elo_utils import apply_multiphase_decay
 from optimization.full_genetic_with_k_denom_mov import optimize_elo_parameters_with_ga
 from optimization.ga_engine import create_elo_fitness_function, GeneticAlgorithm
 import json
 from datetime import datetime
+
+def run_elo_with_decay(df, k=32, base_elo=1500, denominator=400, use_mov=True, 
+                        draw_k_factor=0.5, use_decay=False, quick_succession_days=60,
+                        quick_succession_bump=1.05, decay_days=365, decay_rate=0.001):
+    """
+    Enhanced Elo loop with optional inactivity decay and quick succession improvement.
+    
+    Args:
+        use_decay: If True, applies multiphase decay/improvement adjustments
+        quick_succession_days: Days threshold for quick succession bump (active fighters)
+        quick_succession_bump: Multiplier for recently active fighters (> 1.0 = improvement)
+        decay_days: Days threshold for decay to start (inactive fighters)
+        decay_rate: Exponential decay rate for inactive fighters
+    """
+    df = df.copy()
+    ratings = {}
+    last_fight_date = {}  # Track last fight date for each fighter
+    pre, post, opp_pre, opp_post = [], [], [], []
+
+    for _, row in df.iterrows():
+        f1, f2, res = row["FIGHTER"], row["opp_FIGHTER"], row["result"]
+        current_date = row["DATE"]
+        
+        # Check if this is a draw
+        is_draw = (row.get("win", 1) == 0) and (row.get("loss", 1) == 0)
+        if is_draw:
+            res = 0.5
+        
+        # Get base ratings
+        r1 = ratings.get(f1, base_elo)
+        r2 = ratings.get(f2, base_elo)
+        
+        # Apply decay/improvement adjustments if enabled
+        if use_decay:
+            # Calculate days since last fight
+            days_since_f1 = None
+            days_since_f2 = None
+            if f1 in last_fight_date:
+                days_since_f1 = (current_date - last_fight_date[f1]).days
+            if f2 in last_fight_date:
+                days_since_f2 = (current_date - last_fight_date[f2]).days
+            
+            # Apply multiphase decay/improvement
+            r1 = apply_multiphase_decay(r1, days_since_f1, quick_succession_days,
+                                       quick_succession_bump, decay_days, decay_rate)
+            r2 = apply_multiphase_decay(r2, days_since_f2, quick_succession_days,
+                                       quick_succession_bump, decay_days, decay_rate)
+
+        # logistic expectation
+        e1 = 1 / (1 + 10 ** ((r2 - r1) / denominator))
+        e2 = 1 / (1 + 10 ** ((r1 - r2) / denominator))
+
+        # method of victory multiplier
+        from elo.elo_utils import method_of_victory_scale
+        if use_mov:
+            mov_scale = method_of_victory_scale(row)
+            k_eff = k * mov_scale
+        else:
+            k_eff = k
+        
+        # Reduce K-factor for draws
+        if is_draw:
+            k_eff = k_eff * draw_k_factor
+
+        # update ratings
+        r1_new = r1 + k_eff * (res - e1)
+        r2_new = r2 + k_eff * ((1 - res) - e2)
+
+        ratings[f1], ratings[f2] = r1_new, r2_new
+        last_fight_date[f1] = current_date
+        last_fight_date[f2] = current_date
+        
+        pre.append(r1)
+        post.append(r1_new)
+        opp_pre.append(r2)
+        opp_post.append(r2_new)
+
+    df["precomp_elo"] = pre
+    df["postcomp_elo"] = post
+    df["opp_precomp_elo"] = opp_pre
+    df["opp_postcomp_elo"] = opp_post
+    return df
+
 
 def print_section(title):
     """Print a formatted section header"""
@@ -435,9 +519,97 @@ def main():
     print(f"{'Val-OOS Gap':<20} {gap_std:>6.2f}%        {gap_cal:>6.2f}%        {gap_cal - gap_std:>+6.2f}%")
     
     # ========================================================================
-    # SECTION 4: SUMMARY
+    # SECTION 4: DECAY/IMPROVEMENT RATE ANALYSIS
     # ========================================================================
-    print_section("SECTION 4: SUMMARY OF FINDINGS")
+    print_section("SECTION 4: DECAY/IMPROVEMENT RATE FOR INACTIVE/ACTIVE FIGHTERS")
+    
+    print("\nThis experiment tests the impact of adjusting Elo ratings based on")
+    print("fighter activity/inactivity:")
+    print("  - Active fighters (< 60 days since last fight): +5% Elo boost")
+    print("  - Inactive fighters (> 365 days since last fight): exponential decay")
+    print("\nTesting WITH MOV configuration (K=170) as baseline...")
+    
+    # Test without decay (baseline)
+    print("\nRunning WITHOUT decay (baseline)...")
+    df_no_decay = run_elo_with_decay(
+        df.copy(), k=170, base_elo=1500, denominator=400, 
+        use_mov=True, use_decay=False
+    )
+    val_df_no_decay = df_no_decay[df_no_decay['DATE'] > one_year_ago].copy()
+    val_metrics_no_decay = calculate_comprehensive_metrics(df_no_decay, val_df_no_decay, "Without Decay")
+    
+    ratings_no_decay = {}
+    for _, row in df_no_decay.iterrows():
+        ratings_no_decay[row['FIGHTER']] = row['postcomp_elo']
+        ratings_no_decay[row['opp_FIGHTER']] = row['opp_postcomp_elo']
+    oos_metrics_no_decay = calculate_oos_metrics_with_market_odds(ratings_no_decay, test_df, denominator=400)
+    
+    # Test with decay
+    print("\nRunning WITH decay/improvement adjustments...")
+    df_with_decay = run_elo_with_decay(
+        df.copy(), k=170, base_elo=1500, denominator=400,
+        use_mov=True, use_decay=True,
+        quick_succession_days=60, quick_succession_bump=1.05,
+        decay_days=365, decay_rate=0.001
+    )
+    val_df_with_decay = df_with_decay[df_with_decay['DATE'] > one_year_ago].copy()
+    val_metrics_with_decay = calculate_comprehensive_metrics(df_with_decay, val_df_with_decay, "With Decay")
+    
+    ratings_with_decay = {}
+    for _, row in df_with_decay.iterrows():
+        ratings_with_decay[row['FIGHTER']] = row['postcomp_elo']
+        ratings_with_decay[row['opp_FIGHTER']] = row['opp_postcomp_elo']
+    oos_metrics_with_decay = calculate_oos_metrics_with_market_odds(ratings_with_decay, test_df, denominator=400)
+    
+    # Print results
+    print("\n" + "-"*80)
+    print("DECAY/IMPROVEMENT IMPACT ON PERFORMANCE")
+    print("-"*80)
+    print(f"{'Metric':<20} {'WITHOUT Decay':<15} {'WITH Decay':<15} {'Difference':<15}")
+    print("-"*80)
+    print("\nValidation Set:")
+    print(f"{'Accuracy':<20} {val_metrics_no_decay['accuracy']*100:>6.2f}%        {val_metrics_with_decay['accuracy']*100:>6.2f}%        {(val_metrics_with_decay['accuracy'] - val_metrics_no_decay['accuracy'])*100:>+6.2f}%")
+    print(f"{'Log Loss':<20} {val_metrics_no_decay['log_loss']:>6.4f}         {val_metrics_with_decay['log_loss']:>6.4f}         {val_metrics_with_decay['log_loss'] - val_metrics_no_decay['log_loss']:>+6.4f}")
+    print(f"{'Brier Score':<20} {val_metrics_no_decay['brier_score']:>6.4f}         {val_metrics_with_decay['brier_score']:>6.4f}         {val_metrics_with_decay['brier_score'] - val_metrics_no_decay['brier_score']:>+6.4f}")
+    print(f"{'ROI':<20} {val_metrics_no_decay['roi']:>6.2f}%        {val_metrics_with_decay['roi']:>6.2f}%        {val_metrics_with_decay['roi'] - val_metrics_no_decay['roi']:>+6.2f}%")
+    print(f"{'Sharpe Ratio':<20} {val_metrics_no_decay['sharpe_ratio']:>6.4f}         {val_metrics_with_decay['sharpe_ratio']:>6.4f}         {val_metrics_with_decay['sharpe_ratio'] - val_metrics_no_decay['sharpe_ratio']:>+6.4f}")
+    
+    print("\nOut-of-Sample Set:")
+    print(f"{'Accuracy':<20} {oos_metrics_no_decay['accuracy']*100:>6.2f}%        {oos_metrics_with_decay['accuracy']*100:>6.2f}%        {(oos_metrics_with_decay['accuracy'] - oos_metrics_no_decay['accuracy'])*100:>+6.2f}%")
+    print(f"{'Log Loss':<20} {oos_metrics_no_decay['log_loss']:>6.4f}         {oos_metrics_with_decay['log_loss']:>6.4f}         {oos_metrics_with_decay['log_loss'] - oos_metrics_no_decay['log_loss']:>+6.4f}")
+    print(f"{'Brier Score':<20} {oos_metrics_no_decay['brier_score']:>6.4f}         {oos_metrics_with_decay['brier_score']:>6.4f}         {oos_metrics_with_decay['brier_score'] - oos_metrics_no_decay['brier_score']:>+6.4f}")
+    print(f"{'ROI':<20} {oos_metrics_no_decay['roi']:>6.2f}%        {oos_metrics_with_decay['roi']:>6.2f}%        {oos_metrics_with_decay['roi'] - oos_metrics_no_decay['roi']:>+6.2f}%")
+    print(f"{'Sharpe Ratio':<20} {oos_metrics_no_decay['sharpe_ratio']:>6.4f}         {oos_metrics_with_decay['sharpe_ratio']:>6.4f}         {oos_metrics_with_decay['sharpe_ratio'] - oos_metrics_no_decay['sharpe_ratio']:>+6.4f}")
+    
+    print("\n" + "-"*80)
+    print("ANALYSIS:")
+    print("-"*80)
+    roi_improvement_val = val_metrics_with_decay['roi'] - val_metrics_no_decay['roi']
+    roi_improvement_oos = oos_metrics_with_decay['roi'] - oos_metrics_no_decay['roi']
+    
+    if roi_improvement_val > 0 and roi_improvement_oos > 0:
+        print(f"✓ Decay/improvement adjustments IMPROVE performance:")
+        print(f"  - Validation ROI: {roi_improvement_val:+.2f}%")
+        print(f"  - OOS ROI: {roi_improvement_oos:+.2f}%")
+    elif roi_improvement_val < 0 and roi_improvement_oos < 0:
+        print(f"✗ Decay/improvement adjustments DEGRADE performance:")
+        print(f"  - Validation ROI: {roi_improvement_val:+.2f}%")
+        print(f"  - OOS ROI: {roi_improvement_oos:+.2f}%")
+    else:
+        print(f"→ Mixed results - decay has different effects on validation vs OOS:")
+        print(f"  - Validation ROI: {roi_improvement_val:+.2f}%")
+        print(f"  - OOS ROI: {roi_improvement_oos:+.2f}%")
+    
+    print("\nDecay Parameters Tested:")
+    print(f"  - Quick succession threshold: 60 days")
+    print(f"  - Quick succession bump: +5% Elo boost")
+    print(f"  - Decay threshold: 365 days")
+    print(f"  - Decay rate: 0.001 (exponential)")
+    
+    # ========================================================================
+    # SECTION 5: SUMMARY
+    # ========================================================================
+    print_section("SECTION 5: SUMMARY OF FINDINGS")
     
     print("\n1. MOV IMPACT:")
     print(f"   - MOV improves ROI by {val_metrics_mov['roi'] - val_metrics_no_mov['roi']:+.2f}% on validation")
@@ -451,13 +623,23 @@ def main():
         print(f"   - Calibration-focused optimization does not reduce val-OOS gap")
         print(f"   - Gap difference: {gap_cal - gap_std:+.2f}%")
     
-    print("\n3. DATA INTEGRITY:")
+    print("\n3. DECAY/IMPROVEMENT ADJUSTMENTS:")
+    if roi_improvement_val > 0 and roi_improvement_oos > 0:
+        print(f"   - Decay/improvement adjustments IMPROVE ROI")
+        print(f"   - Validation: {roi_improvement_val:+.2f}%, OOS: {roi_improvement_oos:+.2f}%")
+    elif roi_improvement_val < 0 and roi_improvement_oos < 0:
+        print(f"   - Decay/improvement adjustments DEGRADE ROI")
+        print(f"   - Validation: {roi_improvement_val:+.2f}%, OOS: {roi_improvement_oos:+.2f}%")
+    else:
+        print(f"   - Mixed results (Val: {roi_improvement_val:+.2f}%, OOS: {roi_improvement_oos:+.2f}%)")
+    
+    print("\n4. DATA INTEGRITY:")
     print(f"   - All {train_stats['total_fights']:,} training fights used (no data excluded)")
     print(f"   - Validation uses {val_stats['total_fights']:,} fights from last year")
     print(f"   - OOS uses {oos_stats['total_fights']:,} fights from future events")
     print(f"   - Fighter filtering only for evaluation (boutcount > 1), not training")
     
-    print("\n4. EXPERIMENTAL PRECISION:")
+    print("\n5. EXPERIMENTAL PRECISION:")
     print(f"   - Base Elo: 1500 for all experiments")
     print(f"   - Evaluation follows elo_explanation.md methodology")
     print(f"   - ROI calculated with derived odds (validation) and market odds (OOS)")
@@ -497,6 +679,22 @@ def main():
                 'denominator': denom_cal,
                 'validation': val_metrics_cal,
                 'oos': oos_metrics_cal
+            }
+        },
+        'decay_experiment': {
+            'without_decay': {
+                'validation': val_metrics_no_decay,
+                'oos': oos_metrics_no_decay
+            },
+            'with_decay': {
+                'validation': val_metrics_with_decay,
+                'oos': oos_metrics_with_decay,
+                'parameters': {
+                    'quick_succession_days': 60,
+                    'quick_succession_bump': 1.05,
+                    'decay_days': 365,
+                    'decay_rate': 0.001
+                }
             }
         }
     }
