@@ -607,9 +607,125 @@ def main():
     print(f"  - Decay rate: 0.001 (exponential)")
     
     # ========================================================================
-    # SECTION 5: SUMMARY
+    # SECTION 5: DECAY PARAMETER OPTIMIZATION
     # ========================================================================
-    print_section("SECTION 5: SUMMARY OF FINDINGS")
+    print_section("SECTION 5: DECAY PARAMETER OPTIMIZATION")
+    
+    print("\nThis section optimizes the decay/improvement parameters to maximize")
+    print("OOS ROI. We'll search across parameter combinations:")
+    print("  - Quick succession threshold: [30, 45, 60, 90] days")
+    print("  - Quick succession bump: [1.03, 1.05, 1.08, 1.10]")
+    print("  - Decay threshold: [180, 270, 365, 540] days")
+    print("  - Decay rate: [0.0005, 0.001, 0.002, 0.005]")
+    print("\nTesting all combinations (256 total) - this may take a few minutes...")
+    
+    # Define parameter grid
+    quick_succession_days_range = [30, 45, 60, 90]
+    quick_succession_bump_range = [1.03, 1.05, 1.08, 1.10]
+    decay_days_range = [180, 270, 365, 540]
+    decay_rate_range = [0.0005, 0.001, 0.002, 0.005]
+    
+    best_oos_roi = -float('inf')
+    best_params = None
+    best_results = None
+    
+    total_combinations = (len(quick_succession_days_range) * 
+                         len(quick_succession_bump_range) * 
+                         len(decay_days_range) * 
+                         len(decay_rate_range))
+    
+    tested_count = 0
+    
+    for qs_days in quick_succession_days_range:
+        for qs_bump in quick_succession_bump_range:
+            for d_days in decay_days_range:
+                for d_rate in decay_rate_range:
+                    tested_count += 1
+                    if tested_count % 50 == 0:
+                        print(f"  Progress: {tested_count}/{total_combinations} combinations tested...")
+                    
+                    # Run Elo with these decay parameters
+                    df_test = run_elo_with_decay(
+                        df.copy(), k=170, base_elo=1500, denominator=400,
+                        use_mov=True, use_decay=True,
+                        quick_succession_days=qs_days,
+                        quick_succession_bump=qs_bump,
+                        decay_days=d_days,
+                        decay_rate=d_rate
+                    )
+                    
+                    # Calculate OOS metrics
+                    ratings_test = {}
+                    for _, row in df_test.iterrows():
+                        ratings_test[row['FIGHTER']] = row['postcomp_elo']
+                        ratings_test[row['opp_FIGHTER']] = row['opp_postcomp_elo']
+                    
+                    oos_test = calculate_oos_metrics_with_market_odds(ratings_test, test_df, denominator=400)
+                    
+                    # Check if this is best
+                    if oos_test['roi'] > best_oos_roi:
+                        best_oos_roi = oos_test['roi']
+                        best_params = {
+                            'quick_succession_days': qs_days,
+                            'quick_succession_bump': qs_bump,
+                            'decay_days': d_days,
+                            'decay_rate': d_rate
+                        }
+                        
+                        # Calculate validation metrics for best config
+                        val_df_test = df_test[df_test['DATE'] > one_year_ago].copy()
+                        val_test = calculate_comprehensive_metrics(df_test, val_df_test, "Optimized Decay")
+                        
+                        best_results = {
+                            'val_metrics': val_test,
+                            'oos_metrics': oos_test
+                        }
+    
+    print(f"\nOptimization complete! Tested {total_combinations} parameter combinations.")
+    print("\n" + "-"*80)
+    print("OPTIMAL DECAY PARAMETERS")
+    print("-"*80)
+    print(f"Quick succession threshold: {best_params['quick_succession_days']} days")
+    print(f"Quick succession bump: {best_params['quick_succession_bump']:.2f}x ({(best_params['quick_succession_bump']-1)*100:.1f}% boost)")
+    print(f"Decay threshold: {best_params['decay_days']} days")
+    print(f"Decay rate: {best_params['decay_rate']:.4f}")
+    
+    print("\n" + "-"*80)
+    print("OPTIMIZED DECAY PERFORMANCE")
+    print("-"*80)
+    print(f"{'Metric':<20} {'No Decay':<15} {'Default Decay':<15} {'Optimized Decay':<15}")
+    print("-"*80)
+    print("\nValidation Set:")
+    print(f"{'ROI':<20} {val_metrics_no_decay['roi']:>6.2f}%        {val_metrics_with_decay['roi']:>6.2f}%        {best_results['val_metrics']['roi']:>6.2f}%")
+    print(f"{'Accuracy':<20} {val_metrics_no_decay['accuracy']*100:>6.2f}%        {val_metrics_with_decay['accuracy']*100:>6.2f}%        {best_results['val_metrics']['accuracy']*100:>6.2f}%")
+    print(f"{'Log Loss':<20} {val_metrics_no_decay['log_loss']:>6.4f}         {val_metrics_with_decay['log_loss']:>6.4f}         {best_results['val_metrics']['log_loss']:>6.4f}")
+    print(f"{'Brier Score':<20} {val_metrics_no_decay['brier_score']:>6.4f}         {val_metrics_with_decay['brier_score']:>6.4f}         {best_results['val_metrics']['brier_score']:>6.4f}")
+    
+    print("\nOut-of-Sample Set:")
+    print(f"{'ROI':<20} {oos_metrics_no_decay['roi']:>6.2f}%        {oos_metrics_with_decay['roi']:>6.2f}%        {best_results['oos_metrics']['roi']:>6.2f}%")
+    print(f"{'Accuracy':<20} {oos_metrics_no_decay['accuracy']*100:>6.2f}%        {oos_metrics_with_decay['accuracy']*100:>6.2f}%        {best_results['oos_metrics']['accuracy']*100:>6.2f}%")
+    print(f"{'Log Loss':<20} {oos_metrics_no_decay['log_loss']:>6.4f}         {oos_metrics_with_decay['log_loss']:>6.4f}         {best_results['oos_metrics']['log_loss']:>6.4f}")
+    print(f"{'Brier Score':<20} {oos_metrics_no_decay['brier_score']:>6.4f}         {oos_metrics_with_decay['brier_score']:>6.4f}         {best_results['oos_metrics']['brier_score']:>6.4f}")
+    
+    print("\n" + "-"*80)
+    print("OPTIMIZATION IMPROVEMENTS:")
+    print("-"*80)
+    oos_improvement_from_default = best_results['oos_metrics']['roi'] - oos_metrics_with_decay['roi']
+    oos_improvement_from_no_decay = best_results['oos_metrics']['roi'] - oos_metrics_no_decay['roi']
+    
+    print(f"OOS ROI improvement over default decay: {oos_improvement_from_default:+.2f}%")
+    print(f"OOS ROI improvement over no decay: {oos_improvement_from_no_decay:+.2f}%")
+    print(f"Final OOS ROI: {best_results['oos_metrics']['roi']:.2f}%")
+    
+    if best_results['oos_metrics']['roi'] > 0:
+        print(f"\n✓ POSITIVE ROI ACHIEVED! System is potentially profitable for betting.")
+    else:
+        print(f"\n✗ Still negative ROI. More optimization or additional features may be needed.")
+    
+    # ========================================================================
+    # SECTION 6: SUMMARY
+    # ========================================================================
+    print_section("SECTION 6: SUMMARY OF FINDINGS")
     
     print("\n1. MOV IMPACT:")
     print(f"   - MOV improves ROI by {val_metrics_mov['roi'] - val_metrics_no_mov['roi']:+.2f}% on validation")
@@ -633,13 +749,20 @@ def main():
     else:
         print(f"   - Mixed results (Val: {roi_improvement_val:+.2f}%, OOS: {roi_improvement_oos:+.2f}%)")
     
-    print("\n4. DATA INTEGRITY:")
+    print("\n4. DECAY PARAMETER OPTIMIZATION:")
+    print(f"   - Tested {total_combinations} parameter combinations")
+    print(f"   - Best OOS ROI: {best_results['oos_metrics']['roi']:.2f}%")
+    print(f"   - Improvement over default decay: {oos_improvement_from_default:+.2f}%")
+    print(f"   - Improvement over no decay: {oos_improvement_from_no_decay:+.2f}%")
+    print(f"   - Optimal params: QS={best_params['quick_succession_days']}d, bump={best_params['quick_succession_bump']:.2f}x, decay={best_params['decay_days']}d, rate={best_params['decay_rate']:.4f}")
+    
+    print("\n5. DATA INTEGRITY:")
     print(f"   - All {train_stats['total_fights']:,} training fights used (no data excluded)")
     print(f"   - Validation uses {val_stats['total_fights']:,} fights from last year")
     print(f"   - OOS uses {oos_stats['total_fights']:,} fights from future events")
     print(f"   - Fighter filtering only for evaluation (boutcount > 1), not training")
     
-    print("\n5. EXPERIMENTAL PRECISION:")
+    print("\n6. EXPERIMENTAL PRECISION:")
     print(f"   - Base Elo: 1500 for all experiments")
     print(f"   - Evaluation follows elo_explanation.md methodology")
     print(f"   - ROI calculated with derived odds (validation) and market odds (OOS)")
@@ -686,7 +809,7 @@ def main():
                 'validation': val_metrics_no_decay,
                 'oos': oos_metrics_no_decay
             },
-            'with_decay': {
+            'with_decay_default': {
                 'validation': val_metrics_with_decay,
                 'oos': oos_metrics_with_decay,
                 'parameters': {
@@ -694,6 +817,16 @@ def main():
                     'quick_succession_bump': 1.05,
                     'decay_days': 365,
                     'decay_rate': 0.001
+                }
+            },
+            'with_decay_optimized': {
+                'validation': best_results['val_metrics'],
+                'oos': best_results['oos_metrics'],
+                'parameters': best_params,
+                'optimization_stats': {
+                    'total_combinations_tested': total_combinations,
+                    'oos_roi_improvement_over_default': oos_improvement_from_default,
+                    'oos_roi_improvement_over_no_decay': oos_improvement_from_no_decay
                 }
             }
         }
