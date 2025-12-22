@@ -2,18 +2,18 @@
   "optimization_type": "combined_ga",
   "optimization_mode": "combined",
   "best_parameters": {
-    "generation": 1,
-    "fitness": 1143.5683793444512,
-    "quick_succession_days": 48.962094744779066,
-    "quick_succession_bump": 1.0902559776712042,
-    "decay_days": 339.1595125875585,
-    "decay_rate": 0.0070688460345616575
+    "generation": 3,
+    "fitness": 1245498.94033031,
+    "quick_succession_days": 115.20444342386001,
+    "quick_succession_bump": 1.15,
+    "decay_days": 272.2147805533491,
+    "decay_rate": 0.0025976721820512795
   },
   "validation_performance": {
-    "roi": 2616.7042035802874,
+    "roi": 4034348.177142158,
     "accuracy": 57.48031496062992,
-    "ece": 0.25684559317450756,
-    "brier": 0.3027728106530528,
+    "ece": 0.29695870329805635,
+    "brier": 0.33110461627666904,
     "n_fights": 352
   },
   "oos_performance": {
@@ -24,11 +24,27 @@
   "generation_history": [
     {
       "generation": 1,
-      "fitness": 1143.5683793444512,
-      "quick_succession_days": 48.962094744779066,
-      "quick_succession_bump": 1.0902559776712042,
-      "decay_days": 339.1595125875585,
-      "decay_rate": 0.0070688460345616575
+      "fitness": 29615.853697688748,
+      "quick_succession_days": 97.44815881615041,
+      "quick_succession_bump": 1.15,
+      "decay_days": 204.5792566555202,
+      "decay_rate": 0.002558741648067966
+    },
+    {
+      "generation": 2,
+      "fitness": 545822.8378040962,
+      "quick_succession_days": 112.21062109869104,
+      "quick_succession_bump": 1.15,
+      "decay_days": 329.9504769656503,
+      "decay_rate": 0.0027488539845746296
+    },
+    {
+      "generation": 3,
+      "fitness": 1245498.94033031,
+      "quick_succession_days": 115.20444342386001,
+      "quick_succession_bump": 1.15,
+      "decay_days": 272.2147805533491,
+      "decay_rate": 0.0025976721820512795
     }
   ]
 }
