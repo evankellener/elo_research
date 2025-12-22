@@ -59,6 +59,24 @@ Genetic algorithms use evolutionary principles to efficiently explore large para
 - **Adaptive search**: Focuses exploration on promising regions of parameter space
 - **Early stopping**: Automatically stops when converged, saving computation time
 
+### Implementation: Custom GA Engine vs DEAP
+
+This project uses two GA implementations:
+
+1. **Custom GA Engine** (`optimization/ga_engine.py`) - Used in main optimization scripts
+   - Purpose-built for Elo parameter optimization
+   - Clean interface tailored to this project's needs
+   - No external dependencies beyond standard scientific Python stack
+   - Used in: `full_genetic_with_k_denom_mov.py`, `ga_time_split_roi.py`, example scripts
+
+2. **DEAP** (Distributed Evolutionary Algorithms in Python) - Used in experimental scripts
+   - Industry-standard genetic algorithm framework
+   - Provides pre-built GA operators (selection, crossover, mutation)
+   - Flexible for multi-objective optimization experiments
+   - Used in: `optimize_decay_ga*.py` scripts for decay parameter research (see `CONSISTENCY_OPTIMIZATION_APPROACH.md`)
+
+**For most users**: The main optimization scripts (examples and `optimization/` directory) use the custom GA engine and provide the best experience. The DEAP-based scripts are experimental research tools for testing decay parameters and alternative fitness functions.
+
 ---
 
 ## Available Scripts
