@@ -671,6 +671,13 @@ Examples:
     df_train['DATE'] = pd.to_datetime(df_train['DATE'])
     df_train = df_train.sort_values('DATE').reset_index(drop=True)
     
+    # Add bout counts if not already present
+    df_train = add_bout_counts(df_train)
+    
+    # Ensure bout count columns are numeric
+    df_train['precomp_boutcount'] = pd.to_numeric(df_train['precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+    df_train['opp_precomp_boutcount'] = pd.to_numeric(df_train['opp_precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+    
     df_with_elo, ratings, last_fight = run_elo_with_params(
         df_train, k=170, base_elo=1500, denominator=400, use_mov=True,
         quick_succession_days=best_ever['quick_succession_days'],
