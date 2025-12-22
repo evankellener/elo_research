@@ -25,6 +25,10 @@ import random
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from elo.elo_utils import method_of_victory_scale, apply_multiphase_decay, add_bout_counts
 
+# Constants for fitness calculation
+EPSILON_THRESHOLD = 0.01  # Threshold to prevent division by near-zero in Sharpe ratio
+MIN_FITNESS = -1000.0  # Minimum fitness value for error cases
+
 def american_odds_to_decimal(odds):
     """Convert American odds to decimal odds."""
     if pd.isna(odds):
@@ -187,6 +191,10 @@ def evaluate_consistency_fitness(individual):
     2. Sharpe ratio (mean/std of window ROIs)
     3. Calibration quality (low ECE and Brier)
     4. Trend stability (penalize high volatility)
+    
+    Note: Data is loaded within each fitness function to maintain DEAP compatibility.
+    While this creates some overhead, it ensures thread-safety and allows the GA
+    framework to potentially parallelize evaluations in the future.
     """
     quick_succession_days, quick_succession_bump, decay_days, decay_rate = individual
     
@@ -218,7 +226,7 @@ def evaluate_consistency_fitness(individual):
         val_df = df_with_elo[df_with_elo['DATE'] > one_year_ago].copy()
         
         if len(val_df) < 50:  # Need minimum data
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         # Split validation into 4 quarters for rolling window analysis
         val_df['quarter'] = pd.qcut(val_df['DATE'], q=4, labels=False, duplicates='drop')
@@ -243,7 +251,7 @@ def evaluate_consistency_fitness(individual):
                 window_calibrations.append((ece, brier))
         
         if len(window_rois) < 2:  # Need at least 2 windows
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         # Fitness components
         mean_roi = np.mean(window_rois)
@@ -251,8 +259,8 @@ def evaluate_consistency_fitness(individual):
         
         # Sharpe ratio (reward per unit risk)
         # Add epsilon to prevent division by near-zero, which causes extremely high fitness values
-        if std_roi < 0.01 or not np.isfinite(std_roi):  # Avoid division by zero or very small values
-            sharpe = mean_roi if mean_roi > 0 else -1000
+        if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):  # Avoid division by zero or very small values
+            sharpe = mean_roi if mean_roi > 0 else MIN_FITNESS
         else:
             sharpe = mean_roi / std_roi
         
@@ -284,13 +292,13 @@ def evaluate_consistency_fitness(individual):
         
         # Sanity check - ensure fitness is finite
         if not np.isfinite(fitness):
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         return (fitness,)
         
     except Exception as e:
         print(f"Error in fitness evaluation: {e}")
-        return (-1000.0,)
+        return (MIN_FITNESS,)
 
 
 def evaluate_sharpe_fitness(individual):
@@ -320,7 +328,7 @@ def evaluate_sharpe_fitness(individual):
         val_df = df_with_elo[df_with_elo['DATE'] > one_year_ago].copy()
         
         if len(val_df) < 50:
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         val_df['quarter'] = pd.qcut(val_df['DATE'], q=4, labels=False, duplicates='drop')
         window_rois = []
@@ -334,14 +342,14 @@ def evaluate_sharpe_fitness(individual):
                 window_rois.append(roi)
         
         if len(window_rois) < 2:
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         mean_roi = np.mean(window_rois)
         std_roi = np.std(window_rois)
         
         # Pure Sharpe ratio with epsilon protection
-        if std_roi < 0.01 or not np.isfinite(std_roi):
-            sharpe = mean_roi if mean_roi > 0 else -1000
+        if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):
+            sharpe = mean_roi if mean_roi > 0 else MIN_FITNESS
         else:
             sharpe = mean_roi / std_roi
         
@@ -350,13 +358,13 @@ def evaluate_sharpe_fitness(individual):
             sharpe += 0.1 * mean_roi
         
         if not np.isfinite(sharpe):
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         return (sharpe,)
         
     except Exception as e:
         print(f"Error in fitness evaluation: {e}")
-        return (-1000.0,)
+        return (MIN_FITNESS,)
 
 
 def evaluate_roi_fitness(individual):
@@ -386,18 +394,18 @@ def evaluate_roi_fitness(individual):
         val_df = df_with_elo[df_with_elo['DATE'] > one_year_ago].copy()
         
         if len(val_df) < 50:
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         roi, n_fights = calculate_window_roi(val_df)
         
         if n_fights == 0:
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         return (roi,)
         
     except Exception as e:
         print(f"Error in fitness evaluation: {e}")
-        return (-1000.0,)
+        return (MIN_FITNESS,)
 
 
 def evaluate_brier_fitness(individual):
@@ -428,7 +436,7 @@ def evaluate_brier_fitness(individual):
         val_df = df_with_elo[df_with_elo['DATE'] > one_year_ago].copy()
         
         if len(val_df) < 50:
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         val_df['quarter'] = pd.qcut(val_df['DATE'], q=4, labels=False, duplicates='drop')
         window_briers = []
@@ -442,25 +450,25 @@ def evaluate_brier_fitness(individual):
                 window_briers.append(brier)
         
         if len(window_briers) < 2:
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         mean_brier = np.mean(window_briers)
         std_brier = np.std(window_briers)
         
         # Sharpe-like ratio: -mean_brier / std_brier (negative because lower is better)
-        if std_brier < 0.001 or not np.isfinite(std_brier):
-            fitness = -mean_brier * 100 if mean_brier > 0 else -1000
+        if std_brier < EPSILON_THRESHOLD or not np.isfinite(std_brier):
+            fitness = -mean_brier * 100 if mean_brier > 0 else MIN_FITNESS
         else:
             fitness = -mean_brier / std_brier
         
         if not np.isfinite(fitness):
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         return (fitness,)
         
     except Exception as e:
         print(f"Error in fitness evaluation: {e}")
-        return (-1000.0,)
+        return (MIN_FITNESS,)
 
 
 def main():
