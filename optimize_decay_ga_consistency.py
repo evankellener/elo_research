@@ -28,6 +28,7 @@ from elo.elo_utils import method_of_victory_scale, apply_multiphase_decay, add_b
 # Constants for fitness calculation
 EPSILON_THRESHOLD = 0.01  # Threshold to prevent division by near-zero in Sharpe ratio
 MIN_FITNESS = -1000.0  # Minimum fitness value for error cases
+MAX_SHARPE_RATIO = 20.0  # Maximum Sharpe ratio when std is very small (prevents fitness explosion)
 
 def american_odds_to_decimal(odds):
     """Convert American odds to decimal odds."""
@@ -260,7 +261,8 @@ def evaluate_consistency_fitness(individual):
         # Sharpe ratio (reward per unit risk)
         # Add epsilon to prevent division by near-zero, which causes extremely high fitness values
         if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):  # Avoid division by zero or very small values
-            sharpe = mean_roi if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
+            # Cap the Sharpe ratio to prevent fitness explosion
+            sharpe = min(MAX_SHARPE_RATIO, mean_roi / EPSILON_THRESHOLD) if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
         else:
             sharpe = mean_roi / std_roi
         
@@ -349,7 +351,7 @@ def evaluate_sharpe_fitness(individual):
         
         # Pure Sharpe ratio with epsilon protection
         if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):
-            sharpe = mean_roi if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
+            sharpe = min(MAX_SHARPE_RATIO, mean_roi / EPSILON_THRESHOLD) if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
         else:
             sharpe = mean_roi / std_roi
         
