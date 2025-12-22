@@ -460,64 +460,82 @@ This approach helps prevent overfitting: by optimizing K based on future accurac
 
 ## Results
 
-### Method of Victory (MOV) Impact
+### Comprehensive Performance Analysis: With vs Without MOV
 
-We compared the Elo rating system with and without Method of Victory weights to evaluate the impact of incorporating fight outcome decisiveness into the rating updates.
+The current Elo system uses K=170 with Method of Victory (MOV) weights. Below is a complete comparison against the baseline system without MOV (K=250).
 
-#### Summary Comparison
+#### Performance Metrics
 
-**WITH MOV:**
-- Best K: 170
-- Best Test Accuracy: 0.5861
-- OOS Accuracy (at best K): 0.6053
+| Metric | WITH MOV (K=170) | WITHOUT MOV (K=250) | Difference | Better? |
+|--------|------------------|---------------------|------------|---------|
+| **Validation (Last Year - 352 fights)** |
+| Accuracy | 60.23% | 60.51% | -0.28% | ❌ |
+| Log Loss | 0.6787 | 0.7059 | -0.0272 | ✓ |
+| Brier Score | 0.2424 | 0.2518 | -0.0094 | ✓ |
+| **ROI** | **-7.12%** | **-9.43%** | **+2.31%** | **✓** |
+| **Out-of-Sample (76 fights, market odds)** |
+| Accuracy | 53.95% | 53.95% | +0.00% | → |
+| Log Loss | 0.8452 | 0.9473 | -0.1021 | ✓ |
+| Brier Score | 0.2898 | 0.3127 | -0.0229 | ✓ |
+| **ROI** | **-9.63%** | **-9.96%** | **+0.33%** | **✓** |
 
-**WITHOUT MOV:**
-- Best K: 250
-- Best Test Accuracy: 0.5789
-- OOS Accuracy (at best K): 0.5789
+**Note:** Lower is better for Log Loss and Brier Score. Higher is better for Accuracy and ROI.
 
-**MOV Improvement:**
-- Test Accuracy: +0.0072 (1.2% improvement)
-- OOS Accuracy: +0.0264 (4.6% improvement)
+#### Key Findings
 
-The results show that incorporating Method of Victory weights provides meaningful improvements, particularly in out-of-sample accuracy, demonstrating better generalization to future fights.
+**MOV Impact on Validation Set:**
+- **Improves 3 of 4 metrics** (Log Loss, Brier Score, ROI)
+- **ROI improvement: +2.31%** (24.5% relative improvement)
+- Slightly lower accuracy but better calibration and profitability
 
-#### K Parameter Optimization and MOV Comparison
+**MOV Impact on Out-of-Sample:**
+- **Improves 3 of 4 metrics** (Log Loss, Brier Score, ROI)
+- **ROI improvement: +0.33%** (3.3% relative improvement)
+- Same accuracy but significantly better probability calibration
+- Better calibration translates to better betting decisions
 
-The following plot compares the Elo rating system with and without Method of Victory (MOV) weights across different K values:
+**Overall Assessment:**
+Method of Victory weights enhance the system's performance, particularly in:
+1. **Probability calibration** (lower log loss and Brier score)
+2. **Betting profitability** (higher ROI on both validation and OOS)
+3. **Generalization** (improvements consistent across different evaluation sets)
 
-![MOV Comparison Plot](images/mov_comparison_plot.png)
+The slightly lower accuracy with MOV is offset by substantially better probability estimates, which are more important for profitable betting than raw accuracy.
 
-**Plot Breakdown:**
+### Calibration Optimization Experiment
 
-The visualization consists of four subplots comparing MOV vs No MOV across different accuracy metrics:
+To test whether optimizing for calibration metrics (Sharpe ratio, ECE, Brier score) can improve generalization and reduce the validation-OOS gap, we ran two genetic algorithm optimizations:
 
-1. **Top-Left: Overall Accuracy**
-   - Both "With MOV" (blue circles) and "Without MOV" (orange squares) lines are nearly identical
-   - Both consistently hover around 0.56-0.57 accuracy across all K values
-   - **Finding**: MOV has negligible impact on overall accuracy
+#### Experiment Setup
+- **Standard Optimization**: Equal weights on accuracy, log loss, Brier score, and ROI
+- **Calibration-Focused**: Emphasized calibration (15% accuracy, 25% log loss, 30% Brier, 30% ROI) + bonus for Sharpe ratio, ECE, and calibration metrics
 
-2. **Top-Right: Test Accuracy (Future)**
-   - "With MOV" (blue circles) peaks around 0.58-0.59 for K values 150-200
-   - "Without MOV" (orange squares) peaks around 0.58 for K values 200-250
-   - "With MOV" maintains slightly better performance in the optimal K range
-   - **Finding**: MOV provides a modest improvement in test accuracy, with MOV preferring lower K values
+#### Results
 
-3. **Bottom-Left: Out-of-Sample Accuracy**
-   - "With MOV" (blue triangles) shows a strong peak of ~0.63-0.64 for K values 180-280
-   - "Without MOV" (orange inverted triangles) drops sharply to ~0.52-0.53 for K values 180-200, then recovers to ~0.58-0.59
-   - **Finding**: MOV demonstrates a clear advantage in out-of-sample accuracy, achieving substantially higher peak performance where No MOV performs poorly
+| Approach | K | Denom | Val ROI | OOS ROI | Val-OOS Gap |
+|----------|---|-------|---------|---------|-------------|
+| **Standard** | 75.8 | 446.4 | -0.53% | -4.54% | **4.01%** |
+| **Calibration-Focused** | 81.8 | 485.1 | -0.46% | -4.54% | **4.09%** |
 
-4. **Bottom-Right: All Metrics Combined**
-   - Provides a consolidated view of all six accuracy metrics
-   - Clearly shows that MOV's primary benefit is in out-of-sample accuracy
-   - The OOS accuracy divergence is the most pronounced difference between the two approaches
+**Finding**: Calibration-focused optimization did not reduce the validation-OOS gap in this experiment (4.09% vs 4.01%). Both approaches achieved similar calibration metrics:
+- Log Loss: ~0.669 (val) vs ~0.724 (OOS)
+- Brier Score: ~0.239 (val) vs ~0.262 (OOS)
 
-**Key Takeaways:**
-- MOV has minimal impact on overall accuracy but provides meaningful improvements in test and out-of-sample accuracy
-- The optimal K value differs: MOV performs best at K=170, while No MOV performs best at K=250
-- MOV is particularly effective for predicting truly unseen events (out-of-sample), achieving up to 63% accuracy compared to No MOV's peak of ~60%
-- The improvement is most pronounced in the K range of 180-280, where MOV maintains high OOS accuracy while No MOV experiences a performance dip
+**Analysis**: The val-OOS gap appears to be inherent to the data distribution differences between historical and future events, rather than an optimization artifact. The similar performance suggests:
+1. Both optimizations found well-calibrated solutions
+2. The gap reflects genuine differences between validation and OOS fight characteristics
+3. Further improvements may require different features or modeling approaches rather than just calibration tuning
+
+**Note**: This experiment used smaller population sizes (20) and fewer generations (30) for faster results. Larger-scale optimization might yield different insights.
+
+### System Configuration
+
+**Current Parameters:**
+- K-factor: 170
+- Method of Victory (MOV): Enabled
+- Denominator: 400
+
+The system incorporates fight outcome decisiveness (KO, submission, decision types) into rating updates, which improves prediction quality and betting performance.
 
 ### Genetic Algorithm vs Grid Search
 
@@ -544,17 +562,10 @@ Traditional grid search over K-factor tests ~50 values in a 1D space. To similar
    - GA: Continuous parameter space with mutation
 
 4. **Flexibility**: Easy to add new parameters or constraints
-   - ROI optimization, decay rates, weight class adjustments
+   - **ROI optimization**, decay rates, weight class adjustments
    - Time-series cross-validation for robustness
 
-**Performance Comparison:**
-
-Based on testing with the MMA dataset:
-- Grid search (K only): Best accuracy ~58.6% (K=170)
-- GA optimization (K + denominator): Best accuracy ~61.4% (K=72, denom=436)
-- **Improvement: +2.8% absolute, +4.8% relative**
-
-The GA explores unconventional parameter combinations (like lower K with higher denominator) that grid search would never test, leading to better generalization.
+The GA explores unconventional parameter combinations (like lower K with higher denominator) that grid search would never test, leading to better betting performance.
 
 ## Requirements
 

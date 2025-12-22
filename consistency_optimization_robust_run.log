@@ -1,0 +1,86 @@
+================================================================================
+ROBUST CONSISTENCY-FOCUSED DECAY PARAMETER OPTIMIZATION
+================================================================================
+
+Objective: Maximize Sharpe ratio (mean ROI / std ROI) across validation windows
+Method: Rolling window analysis on validation data only
+OOS: Completely untouched - used only for final blind test
+
+Validation data: 508 fights
+
+GA Configuration: Pop=20, Gen=15, Cx=0.7, Mut=0.3
+
+Starting evolution...
+
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+gen	nevals	max   	mean  
+0  	20    	-1e+10	-1e+10
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+1  	19    	-1e+10	-1e+10
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+2  	18    	-1e+10	-1e+10
+3  	18    	-1e+10	-1e+10
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+Error in evaluation: apply_multiphase_decay() takes 6 positional arguments but 7 were given
+4  	16    	-1e+10	-1e+10
+5  	16    	-1e+10	-1e+10
+6  	18    	-1e+10	-1e+10
+7  	16    	-1e+10	-1e+10
+8  	17    	-1e+10	-1e+10
+9  	20    	-1e+10	-1e+10
+10 	18    	-1e+10	-1e+10
+11 	19    	-1e+10	-1e+10
+12 	15    	-1e+10	-1e+10
+13 	18    	-1e+10	-1e+10
+14 	18    	-1e+10	-1e+10
+15 	14    	-1e+10	-1e+10
+
+================================================================================
+FINAL RESULTS
+================================================================================
+
+Best parameters (by Sharpe ratio):
+  Quick succession days: 116.7
+  Quick succession bump: 1.0653x
+  Decay days: 701.1
+  Decay rate: 0.001780
+  Fitness (Sharpe): -10000000000.0000
+
+Calculating detailed validation metrics...
+Traceback (most recent call last):
+  File "/home/runner/work/elo_research/elo_research/optimize_decay_ga_consistency_robust.py", line 400, in <module>
+    main()
+  File "/home/runner/work/elo_research/elo_research/optimize_decay_ga_consistency_robust.py", line 308, in main
+    val_result = run_elo_with_params(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/elo_research/elo_research/optimize_decay_ga_consistency_robust.py", line 90, in run_elo_with_params
+    r2 = apply_multiphase_decay(
+         ^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: apply_multiphase_decay() takes 6 positional arguments but 7 were given

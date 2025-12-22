@@ -361,9 +361,9 @@ Best composite fitness score: 0.623456
 (Composite of: accuracy, log loss, Brier score, and ROI)
 
 === Comparison with Grid Search ===
-Grid search (K only): Val=0.5861, OOS=0.6053
+Grid search (K only): Val=0.5915, OOS=0.6026
 GA (all params):      Val=0.6145, OOS=0.6234
-Improvement: Val=+0.0284 (+4.85%), OOS=+0.0181 (+2.99%)
+Improvement: Val=+0.0230 (+3.89%), OOS=+0.0208 (+3.45%)
 ```
 
 ---

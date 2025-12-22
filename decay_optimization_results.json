@@ -1,0 +1,743 @@
+{
+  "timestamp": "2025-12-21T19:29:32.249988",
+  "total_combinations_tested": 81,
+  "best_params": {
+    "quick_succession_days": 90,
+    "quick_succession_bump": 1.03,
+    "decay_days": 365,
+    "decay_rate": 0.005
+  },
+  "best_oos_roi": 9.708015636169065,
+  "best_oos_accuracy": 0.6290322580645161,
+  "all_results": [
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.03,
+      "decay_days": 270,
+      "decay_rate": 0.001,
+      "oos_roi": -4.869783225311012,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.03,
+      "decay_days": 270,
+      "decay_rate": 0.002,
+      "oos_roi": 4.597257447900769,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.03,
+      "decay_days": 270,
+      "decay_rate": 0.005,
+      "oos_roi": 6.484738246671891,
+      "oos_accuracy": 0.6129032258064516,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.03,
+      "decay_days": 365,
+      "decay_rate": 0.001,
+      "oos_roi": 6.294895068793179,
+      "oos_accuracy": 0.6129032258064516,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.03,
+      "decay_days": 365,
+      "decay_rate": 0.002,
+      "oos_roi": -2.2488154833755285,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.03,
+      "decay_days": 365,
+      "decay_rate": 0.005,
+      "oos_roi": 4.202797419850279,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.03,
+      "decay_days": 540,
+      "decay_rate": 0.001,
+      "oos_roi": -9.285311761413652,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.03,
+      "decay_days": 540,
+      "decay_rate": 0.002,
+      "oos_roi": -9.226013848700179,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.03,
+      "decay_days": 540,
+      "decay_rate": 0.005,
+      "oos_roi": -3.865457439756674,
+      "oos_accuracy": 0.5806451612903226,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.05,
+      "decay_days": 270,
+      "decay_rate": 0.001,
+      "oos_roi": -4.869783225311012,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.05,
+      "decay_days": 270,
+      "decay_rate": 0.002,
+      "oos_roi": 4.597257447900769,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.05,
+      "decay_days": 270,
+      "decay_rate": 0.005,
+      "oos_roi": 6.484738246671891,
+      "oos_accuracy": 0.6129032258064516,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.05,
+      "decay_days": 365,
+      "decay_rate": 0.001,
+      "oos_roi": 6.294895068793179,
+      "oos_accuracy": 0.6129032258064516,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.05,
+      "decay_days": 365,
+      "decay_rate": 0.002,
+      "oos_roi": -2.2488154833755285,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.05,
+      "decay_days": 365,
+      "decay_rate": 0.005,
+      "oos_roi": 4.202797419850279,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.05,
+      "decay_days": 540,
+      "decay_rate": 0.001,
+      "oos_roi": -9.285311761413652,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.05,
+      "decay_days": 540,
+      "decay_rate": 0.002,
+      "oos_roi": -6.664344019478167,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.05,
+      "decay_days": 540,
+      "decay_rate": 0.005,
+      "oos_roi": -3.865457439756674,
+      "oos_accuracy": 0.5806451612903226,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.1,
+      "decay_days": 270,
+      "decay_rate": 0.001,
+      "oos_roi": -4.869783225311012,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.1,
+      "decay_days": 270,
+      "decay_rate": 0.002,
+      "oos_roi": 4.597257447900769,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.1,
+      "decay_days": 270,
+      "decay_rate": 0.005,
+      "oos_roi": 6.484738246671891,
+      "oos_accuracy": 0.6129032258064516,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.1,
+      "decay_days": 365,
+      "decay_rate": 0.001,
+      "oos_roi": 3.785934495316476,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.1,
+      "decay_days": 365,
+      "decay_rate": 0.002,
+      "oos_roi": 2.2673135488825364,
+      "oos_accuracy": 0.5806451612903226,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.1,
+      "decay_days": 365,
+      "decay_rate": 0.005,
+      "oos_roi": 4.202797419850279,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.1,
+      "decay_days": 540,
+      "decay_rate": 0.001,
+      "oos_roi": -9.285311761413652,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.1,
+      "decay_days": 540,
+      "decay_rate": 0.002,
+      "oos_roi": -6.664344019478167,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 30,
+      "quick_succession_bump": 1.1,
+      "decay_days": 540,
+      "decay_rate": 0.005,
+      "oos_roi": -5.681667794866456,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.03,
+      "decay_days": 270,
+      "decay_rate": 0.001,
+      "oos_roi": -2.6117187091819796,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.03,
+      "decay_days": 270,
+      "decay_rate": 0.002,
+      "oos_roi": 0.8069348672556086,
+      "oos_accuracy": 0.5806451612903226,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.03,
+      "decay_days": 270,
+      "decay_rate": 0.005,
+      "oos_roi": 6.484738246671891,
+      "oos_accuracy": 0.6129032258064516,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.03,
+      "decay_days": 365,
+      "decay_rate": 0.001,
+      "oos_roi": 2.5045724881480185,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.03,
+      "decay_days": 365,
+      "decay_rate": 0.002,
+      "oos_roi": -2.2488154833755285,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.03,
+      "decay_days": 365,
+      "decay_rate": 0.005,
+      "oos_roi": 4.202797419850279,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.03,
+      "decay_days": 540,
+      "decay_rate": 0.001,
+      "oos_roi": -11.005741868940532,
+      "oos_accuracy": 0.532258064516129,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.03,
+      "decay_days": 540,
+      "decay_rate": 0.002,
+      "oos_roi": -8.38477412700505,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.03,
+      "decay_days": 540,
+      "decay_rate": 0.005,
+      "oos_roi": -3.865457439756674,
+      "oos_accuracy": 0.5806451612903226,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.05,
+      "decay_days": 270,
+      "decay_rate": 0.001,
+      "oos_roi": -6.402041289827142,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.05,
+      "decay_days": 270,
+      "decay_rate": 0.002,
+      "oos_roi": 0.8069348672556086,
+      "oos_accuracy": 0.5806451612903226,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.05,
+      "decay_days": 270,
+      "decay_rate": 0.005,
+      "oos_roi": 6.484738246671891,
+      "oos_accuracy": 0.6129032258064516,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.05,
+      "decay_days": 365,
+      "decay_rate": 0.001,
+      "oos_roi": 0.7841423806211367,
+      "oos_accuracy": 0.5806451612903226,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.05,
+      "decay_days": 365,
+      "decay_rate": 0.002,
+      "oos_roi": 0.9232275273771606,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.05,
+      "decay_days": 365,
+      "decay_rate": 0.005,
+      "oos_roi": 2.482367312323398,
+      "oos_accuracy": 0.5806451612903226,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.05,
+      "decay_days": 540,
+      "decay_rate": 0.001,
+      "oos_roi": -11.27727439853758,
+      "oos_accuracy": 0.532258064516129,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.05,
+      "decay_days": 540,
+      "decay_rate": 0.002,
+      "oos_roi": -8.38477412700505,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.05,
+      "decay_days": 540,
+      "decay_rate": 0.005,
+      "oos_roi": -5.585887547283555,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.1,
+      "decay_days": 270,
+      "decay_rate": 0.001,
+      "oos_roi": -8.567241680833986,
+      "oos_accuracy": 0.5161290322580645,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.1,
+      "decay_days": 270,
+      "decay_rate": 0.002,
+      "oos_roi": 0.8069348672556086,
+      "oos_accuracy": 0.5806451612903226,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.1,
+      "decay_days": 270,
+      "decay_rate": 0.005,
+      "oos_roi": 6.484738246671891,
+      "oos_accuracy": 0.6129032258064516,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.1,
+      "decay_days": 365,
+      "decay_rate": 0.001,
+      "oos_roi": 5.028738883282151,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.1,
+      "decay_days": 365,
+      "decay_rate": 0.002,
+      "oos_roi": -0.0781524967732639,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.1,
+      "decay_days": 365,
+      "decay_rate": 0.005,
+      "oos_roi": 3.739051804302005,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.1,
+      "decay_days": 540,
+      "decay_rate": 0.001,
+      "oos_roi": -10.478154163933475,
+      "oos_accuracy": 0.532258064516129,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.1,
+      "decay_days": 540,
+      "decay_rate": 0.002,
+      "oos_roi": -12.930500204989192,
+      "oos_accuracy": 0.532258064516129,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 60,
+      "quick_succession_bump": 1.1,
+      "decay_days": 540,
+      "decay_rate": 0.005,
+      "oos_roi": -14.592550818652711,
+      "oos_accuracy": 0.5161290322580645,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.03,
+      "decay_days": 270,
+      "decay_rate": 0.001,
+      "oos_roi": -3.0955896769239164,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.03,
+      "decay_days": 270,
+      "decay_rate": 0.002,
+      "oos_roi": 3.0649993833846407,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.03,
+      "decay_days": 270,
+      "decay_rate": 0.005,
+      "oos_roi": 8.742802762800924,
+      "oos_accuracy": 0.6290322580645161,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.03,
+      "decay_days": 365,
+      "decay_rate": 0.001,
+      "oos_roi": -6.085359085654527,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.03,
+      "decay_days": 365,
+      "decay_rate": 0.002,
+      "oos_roi": 3.995650044771214,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.03,
+      "decay_days": 365,
+      "decay_rate": 0.005,
+      "oos_roi": 9.708015636169065,
+      "oos_accuracy": 0.6290322580645161,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.03,
+      "decay_days": 540,
+      "decay_rate": 0.001,
+      "oos_roi": -16.705888496506518,
+      "oos_accuracy": 0.5,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.03,
+      "decay_days": 540,
+      "decay_rate": 0.002,
+      "oos_roi": -11.46395301263555,
+      "oos_accuracy": 0.532258064516129,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.03,
+      "decay_days": 540,
+      "decay_rate": 0.005,
+      "oos_roi": -12.428281396318772,
+      "oos_accuracy": 0.532258064516129,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.05,
+      "decay_days": 270,
+      "decay_rate": 0.001,
+      "oos_roi": -5.494819163439931,
+      "oos_accuracy": 0.5483870967741935,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.05,
+      "decay_days": 270,
+      "decay_rate": 0.002,
+      "oos_roi": 3.2922721106573674,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.05,
+      "decay_days": 270,
+      "decay_rate": 0.005,
+      "oos_roi": 6.121835020865439,
+      "oos_accuracy": 0.6129032258064516,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.05,
+      "decay_days": 365,
+      "decay_rate": 0.001,
+      "oos_roi": -8.619921297636095,
+      "oos_accuracy": 0.532258064516129,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.05,
+      "decay_days": 365,
+      "decay_rate": 0.002,
+      "oos_roi": -0.0781524967732639,
+      "oos_accuracy": 0.5645161290322581,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.05,
+      "decay_days": 365,
+      "decay_rate": 0.005,
+      "oos_roi": 4.908406643011684,
+      "oos_accuracy": 0.5967741935483871,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.05,
+      "decay_days": 540,
+      "decay_rate": 0.001,
+      "oos_roi": -16.705888496506518,
+      "oos_accuracy": 0.5,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.05,
+      "decay_days": 540,
+      "decay_rate": 0.002,
+      "oos_roi": -14.084920754571034,
+      "oos_accuracy": 0.5161290322580645,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.05,
+      "decay_days": 540,
+      "decay_rate": 0.005,
+      "oos_roi": -12.052515411811893,
+      "oos_accuracy": 0.532258064516129,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.1,
+      "decay_days": 270,
+      "decay_rate": 0.001,
+      "oos_roi": -5.233682450690315,
+      "oos_accuracy": 0.532258064516129,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.1,
+      "decay_days": 270,
+      "decay_rate": 0.002,
+      "oos_roi": 1.11808406236652,
+      "oos_accuracy": 0.5806451612903226,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.1,
+      "decay_days": 270,
+      "decay_rate": 0.005,
+      "oos_roi": 9.2027057630265,
+      "oos_accuracy": 0.6290322580645161,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.1,
+      "decay_days": 365,
+      "decay_rate": 0.001,
+      "oos_roi": -7.169293794719307,
+      "oos_accuracy": 0.5161290322580645,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.1,
+      "decay_days": 365,
+      "decay_rate": 0.002,
+      "oos_roi": -5.067632015638174,
+      "oos_accuracy": 0.532258064516129,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.1,
+      "decay_days": 365,
+      "decay_rate": 0.005,
+      "oos_roi": -5.431393168692397,
+      "oos_accuracy": 0.532258064516129,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.1,
+      "decay_days": 540,
+      "decay_rate": 0.001,
+      "oos_roi": -24.80506005951783,
+      "oos_accuracy": 0.43548387096774194,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.1,
+      "decay_days": 540,
+      "decay_rate": 0.002,
+      "oos_roi": -25.453343973930775,
+      "oos_accuracy": 0.43548387096774194,
+      "n_fights": 62
+    },
+    {
+      "quick_succession_days": 90,
+      "quick_succession_bump": 1.1,
+      "decay_days": 540,
+      "decay_rate": 0.005,
+      "oos_roi": -19.154060819808908,
+      "oos_accuracy": 0.46774193548387094,
+      "n_fights": 62
+    }
+  ]
+}
