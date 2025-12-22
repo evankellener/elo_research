@@ -2,49 +2,33 @@
   "optimization_type": "combined_ga",
   "optimization_mode": "combined",
   "best_parameters": {
-    "generation": 3,
-    "fitness": 1245498.94033031,
-    "quick_succession_days": 115.20444342386001,
-    "quick_succession_bump": 1.15,
-    "decay_days": 272.2147805533491,
-    "decay_rate": 0.0025976721820512795
+    "generation": 1,
+    "fitness": 25.516844272575142,
+    "quick_succession_days": 65.12224828305762,
+    "quick_succession_bump": 1.0218756805328266,
+    "decay_days": 444.0557879693352,
+    "decay_rate": 0.0022285009703768943
   },
   "validation_performance": {
-    "roi": 4034348.177142158,
-    "accuracy": 57.48031496062992,
-    "ece": 0.29695870329805635,
-    "brier": 0.33110461627666904,
+    "roi": 177.5980285329775,
+    "accuracy": 59.84251968503938,
+    "ece": 0.13859082905851244,
+    "brier": 0.25043178595494,
     "n_fights": 352
   },
   "oos_performance": {
-    "roi": 0.0,
-    "accuracy": 0.0,
-    "n_fights": 0
+    "roi": -18.209094706809232,
+    "accuracy": 61.29032258064516,
+    "n_fights": 62
   },
   "generation_history": [
     {
       "generation": 1,
-      "fitness": 29615.853697688748,
-      "quick_succession_days": 97.44815881615041,
-      "quick_succession_bump": 1.15,
-      "decay_days": 204.5792566555202,
-      "decay_rate": 0.002558741648067966
-    },
-    {
-      "generation": 2,
-      "fitness": 545822.8378040962,
-      "quick_succession_days": 112.21062109869104,
-      "quick_succession_bump": 1.15,
-      "decay_days": 329.9504769656503,
-      "decay_rate": 0.0027488539845746296
-    },
-    {
-      "generation": 3,
-      "fitness": 1245498.94033031,
-      "quick_succession_days": 115.20444342386001,
-      "quick_succession_bump": 1.15,
-      "decay_days": 272.2147805533491,
-      "decay_rate": 0.0025976721820512795
+      "fitness": 25.516844272575142,
+      "quick_succession_days": 65.12224828305762,
+      "quick_succession_bump": 1.0218756805328266,
+      "decay_days": 444.0557879693352,
+      "decay_rate": 0.0022285009703768943
     }
   ]
 }

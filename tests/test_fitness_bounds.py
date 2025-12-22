@@ -68,23 +68,26 @@ class TestFitnessBounds(unittest.TestCase):
         else:
             sharpe = mean_roi / std_roi
         
+        # Cap mean_roi as done in the actual code
+        capped_mean_roi = min(mean_roi, opt.MAX_MEAN_ROI) if mean_roi > 0 else mean_roi
+        
         # Fitness calculation from evaluate_consistency_fitness
         trend_bonus = 0  # Assume no trend
         calibration_penalty = 10  # Typical value
         
         fitness = (
             0.4 * sharpe +
-            0.3 * mean_roi +
+            0.3 * capped_mean_roi +
             0.2 * trend_bonus +
             0.1 * (-calibration_penalty)
         )
         
         # Fitness should be reasonable, not in the millions
-        self.assertLess(fitness, 1000, "Fitness should not be in the thousands")
+        self.assertLess(fitness, 100, "Fitness should not be in the hundreds")
         self.assertGreater(fitness, -1000, "Fitness should not be extremely negative")
         
         # With our fix: 0.4 * 20 + 0.3 * 20 + 0 - 1 = 8 + 6 - 1 = 13
-        expected_fitness = 0.4 * opt.MAX_SHARPE_RATIO + 0.3 * mean_roi - 1.0
+        expected_fitness = 0.4 * opt.MAX_SHARPE_RATIO + 0.3 * capped_mean_roi - 1.0
         self.assertAlmostEqual(fitness, expected_fitness, places=1)
     
     def test_extreme_roi_capped(self):
@@ -97,12 +100,20 @@ class TestFitnessBounds(unittest.TestCase):
         else:
             sharpe = mean_roi / std_roi
         
+        # Cap mean_roi as done in actual code
+        capped_mean_roi = min(mean_roi, opt.MAX_MEAN_ROI) if mean_roi > 0 else mean_roi
+        
         # Even with 500% ROI, sharpe should be capped
         self.assertEqual(sharpe, opt.MAX_SHARPE_RATIO)
         
+        # And mean_roi should be capped
+        self.assertEqual(capped_mean_roi, opt.MAX_MEAN_ROI)
+        
         # Verify fitness won't explode
-        fitness = 0.4 * sharpe + 0.3 * mean_roi
-        self.assertLess(fitness, 200, "Fitness should remain reasonable even with extreme ROI")
+        fitness = 0.4 * sharpe + 0.3 * capped_mean_roi
+        # Max: 0.4 * 20 + 0.3 * 100 = 8 + 30 = 38
+        self.assertLess(fitness, 50, "Fitness should remain reasonable even with extreme ROI")
+        self.assertAlmostEqual(fitness, 38.0, places=1)
 
 if __name__ == '__main__':
     unittest.main()
