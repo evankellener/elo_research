@@ -243,7 +243,11 @@ def evaluate_consistency_fitness(individual):
         std_roi = np.std(window_rois)
         
         # Sharpe ratio (reward per unit risk)
-        sharpe = mean_roi / std_roi if std_roi > 0 else mean_roi
+        # Add epsilon to prevent division by near-zero, which causes extremely high fitness values
+        if std_roi < 0.01 or not np.isfinite(std_roi):  # Avoid division by zero or very small values
+            sharpe = mean_roi if mean_roi > 0 else -1000
+        else:
+            sharpe = mean_roi / std_roi
         
         # Calibration quality (lower is better, so negate)
         if len(window_calibrations) > 0:
@@ -270,6 +274,10 @@ def evaluate_consistency_fitness(individual):
             0.2 * trend_bonus +  # Trend stability
             0.1 * (-calibration_penalty)  # Calibration quality
         )
+        
+        # Sanity check - ensure fitness is finite
+        if not np.isfinite(fitness):
+            return (-1000.0,)
         
         return (fitness,)
         
