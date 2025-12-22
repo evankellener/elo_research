@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """
-Consistency-focused Genetic Algorithm for decay parameter optimization.
+Unified Genetic Algorithm for decay parameter optimization.
 Optimizes for stable performance across validation time windows using only validation data.
 Does NOT touch OOS data during optimization.
+
+Supports multiple optimization modes:
+- combined: Sharpe ratio + mean ROI + trend stability + calibration (default)
+- sharpe: Pure Sharpe ratio optimization
+- roi: Direct ROI optimization
+- brier: Brier score-based optimization
 """
 
 import pandas as pd
@@ -11,12 +17,17 @@ import sys
 import os
 from datetime import datetime, timedelta
 import json
+import argparse
 from deap import base, creator, tools, algorithms
 import random
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from elo.elo_utils import method_of_victory_scale, apply_multiphase_decay, add_bout_counts
+
+# Constants for fitness calculation
+EPSILON_THRESHOLD = 0.01  # Threshold to prevent division by near-zero in Sharpe ratio
+MIN_FITNESS = -1000.0  # Minimum fitness value for error cases
 
 def american_odds_to_decimal(odds):
     """Convert American odds to decimal odds."""
@@ -180,6 +191,10 @@ def evaluate_consistency_fitness(individual):
     2. Sharpe ratio (mean/std of window ROIs)
     3. Calibration quality (low ECE and Brier)
     4. Trend stability (penalize high volatility)
+    
+    Note: Data is loaded within each fitness function to maintain simplicity and avoid
+    global state. While this creates some overhead, it keeps the fitness function 
+    self-contained and compatible with DEAP's function signature requirements.
     """
     quick_succession_days, quick_succession_bump, decay_days, decay_rate = individual
     
@@ -211,7 +226,7 @@ def evaluate_consistency_fitness(individual):
         val_df = df_with_elo[df_with_elo['DATE'] > one_year_ago].copy()
         
         if len(val_df) < 50:  # Need minimum data
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         # Split validation into 4 quarters for rolling window analysis
         val_df['quarter'] = pd.qcut(val_df['DATE'], q=4, labels=False, duplicates='drop')
@@ -236,14 +251,18 @@ def evaluate_consistency_fitness(individual):
                 window_calibrations.append((ece, brier))
         
         if len(window_rois) < 2:  # Need at least 2 windows
-            return (-1000.0,)
+            return (MIN_FITNESS,)
         
         # Fitness components
         mean_roi = np.mean(window_rois)
         std_roi = np.std(window_rois)
         
         # Sharpe ratio (reward per unit risk)
-        sharpe = mean_roi / std_roi if std_roi > 0 else mean_roi
+        # Add epsilon to prevent division by near-zero, which causes extremely high fitness values
+        if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):  # Avoid division by zero or very small values
+            sharpe = mean_roi if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
+        else:
+            sharpe = mean_roi / std_roi
         
         # Calibration quality (lower is better, so negate)
         if len(window_calibrations) > 0:
@@ -271,20 +290,248 @@ def evaluate_consistency_fitness(individual):
             0.1 * (-calibration_penalty)  # Calibration quality
         )
         
+        # Sanity check - ensure fitness is finite
+        if not np.isfinite(fitness):
+            return (MIN_FITNESS,)
+        
         return (fitness,)
         
     except Exception as e:
         print(f"Error in fitness evaluation: {e}")
-        return (-1000.0,)
+        return (MIN_FITNESS,)
+
+
+def evaluate_sharpe_fitness(individual):
+    """
+    Pure Sharpe ratio optimization across validation windows.
+    """
+    quick_succession_days, quick_succession_bump, decay_days, decay_rate = individual
+    
+    try:
+        df_train = pd.read_csv('data/interleaved_cleaned.csv', low_memory=False)
+        df_train['DATE'] = pd.to_datetime(df_train['DATE'])
+        df_train = df_train.sort_values('DATE').reset_index(drop=True)
+        df_train = add_bout_counts(df_train)
+        df_train['precomp_boutcount'] = pd.to_numeric(df_train['precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+        df_train['opp_precomp_boutcount'] = pd.to_numeric(df_train['opp_precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+        
+        df_with_elo, ratings, last_fight = run_elo_with_params(
+            df_train, k=170, base_elo=1500, denominator=400, use_mov=True,
+            quick_succession_days=quick_succession_days,
+            quick_succession_bump=quick_succession_bump,
+            decay_days=decay_days,
+            decay_rate=decay_rate
+        )
+        
+        max_date = df_with_elo['DATE'].max()
+        one_year_ago = max_date - timedelta(days=365)
+        val_df = df_with_elo[df_with_elo['DATE'] > one_year_ago].copy()
+        
+        if len(val_df) < 50:
+            return (MIN_FITNESS,)
+        
+        val_df['quarter'] = pd.qcut(val_df['DATE'], q=4, labels=False, duplicates='drop')
+        window_rois = []
+        
+        for quarter in range(4):
+            window_df = val_df[val_df['quarter'] == quarter].copy()
+            if len(window_df) < 10:
+                continue
+            roi, n_fights = calculate_window_roi(window_df)
+            if n_fights > 0:
+                window_rois.append(roi)
+        
+        if len(window_rois) < 2:
+            return (MIN_FITNESS,)
+        
+        mean_roi = np.mean(window_rois)
+        std_roi = np.std(window_rois)
+        
+        # Pure Sharpe ratio with epsilon protection
+        if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):
+            sharpe = mean_roi if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
+        else:
+            sharpe = mean_roi / std_roi
+        
+        # Small bonus for positive mean ROI
+        if mean_roi > 0:
+            sharpe += 0.1 * mean_roi
+        
+        if not np.isfinite(sharpe):
+            return (MIN_FITNESS,)
+        
+        return (sharpe,)
+        
+    except Exception as e:
+        print(f"Error in fitness evaluation: {e}")
+        return (MIN_FITNESS,)
+
+
+def evaluate_roi_fitness(individual):
+    """
+    Direct ROI optimization (simple mean ROI across validation windows).
+    """
+    quick_succession_days, quick_succession_bump, decay_days, decay_rate = individual
+    
+    try:
+        df_train = pd.read_csv('data/interleaved_cleaned.csv', low_memory=False)
+        df_train['DATE'] = pd.to_datetime(df_train['DATE'])
+        df_train = df_train.sort_values('DATE').reset_index(drop=True)
+        df_train = add_bout_counts(df_train)
+        df_train['precomp_boutcount'] = pd.to_numeric(df_train['precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+        df_train['opp_precomp_boutcount'] = pd.to_numeric(df_train['opp_precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+        
+        df_with_elo, ratings, last_fight = run_elo_with_params(
+            df_train, k=170, base_elo=1500, denominator=400, use_mov=True,
+            quick_succession_days=quick_succession_days,
+            quick_succession_bump=quick_succession_bump,
+            decay_days=decay_days,
+            decay_rate=decay_rate
+        )
+        
+        max_date = df_with_elo['DATE'].max()
+        one_year_ago = max_date - timedelta(days=365)
+        val_df = df_with_elo[df_with_elo['DATE'] > one_year_ago].copy()
+        
+        if len(val_df) < 50:
+            return (MIN_FITNESS,)
+        
+        roi, n_fights = calculate_window_roi(val_df)
+        
+        if n_fights == 0:
+            return (MIN_FITNESS,)
+        
+        return (roi,)
+        
+    except Exception as e:
+        print(f"Error in fitness evaluation: {e}")
+        return (MIN_FITNESS,)
+
+
+def evaluate_brier_fitness(individual):
+    """
+    Brier score-based optimization (Sharpe-like ratio using Brier scores).
+    Lower Brier score is better, so we negate it.
+    """
+    quick_succession_days, quick_succession_bump, decay_days, decay_rate = individual
+    
+    try:
+        df_train = pd.read_csv('data/interleaved_cleaned.csv', low_memory=False)
+        df_train['DATE'] = pd.to_datetime(df_train['DATE'])
+        df_train = df_train.sort_values('DATE').reset_index(drop=True)
+        df_train = add_bout_counts(df_train)
+        df_train['precomp_boutcount'] = pd.to_numeric(df_train['precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+        df_train['opp_precomp_boutcount'] = pd.to_numeric(df_train['opp_precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+        
+        df_with_elo, ratings, last_fight = run_elo_with_params(
+            df_train, k=170, base_elo=1500, denominator=400, use_mov=True,
+            quick_succession_days=quick_succession_days,
+            quick_succession_bump=quick_succession_bump,
+            decay_days=decay_days,
+            decay_rate=decay_rate
+        )
+        
+        max_date = df_with_elo['DATE'].max()
+        one_year_ago = max_date - timedelta(days=365)
+        val_df = df_with_elo[df_with_elo['DATE'] > one_year_ago].copy()
+        
+        if len(val_df) < 50:
+            return (MIN_FITNESS,)
+        
+        val_df['quarter'] = pd.qcut(val_df['DATE'], q=4, labels=False, duplicates='drop')
+        window_briers = []
+        
+        for quarter in range(4):
+            window_df = val_df[val_df['quarter'] == quarter].copy()
+            if len(window_df) < 10:
+                continue
+            ece, brier = calculate_calibration_metrics(window_df)
+            if not np.isinf(brier):
+                window_briers.append(brier)
+        
+        if len(window_briers) < 2:
+            return (MIN_FITNESS,)
+        
+        mean_brier = np.mean(window_briers)
+        std_brier = np.std(window_briers)
+        
+        # Sharpe-like ratio: -mean_brier / std_brier (negative because lower is better)
+        if std_brier < EPSILON_THRESHOLD or not np.isfinite(std_brier):
+            # Brier score ranges from 0 (perfect) to 1 (worst)
+            fitness = -mean_brier * 100 if (mean_brier <= 1 and np.isfinite(mean_brier)) else MIN_FITNESS
+        else:
+            fitness = -mean_brier / std_brier
+        
+        if not np.isfinite(fitness):
+            return (MIN_FITNESS,)
+        
+        return (fitness,)
+        
+    except Exception as e:
+        print(f"Error in fitness evaluation: {e}")
+        return (MIN_FITNESS,)
 
 
 def main():
-    """Run consistency-focused GA optimization."""
+    """Run GA optimization with configurable fitness mode."""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description='Unified Genetic Algorithm for decay parameter optimization',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Optimization Modes:
+  combined  - Sharpe ratio + mean ROI + trend stability + calibration (default)
+  sharpe    - Pure Sharpe ratio optimization
+  roi       - Direct ROI optimization
+  brier     - Brier score-based optimization (calibration-focused)
+
+Examples:
+  python optimize_decay_ga_consistency.py --mode combined
+  python optimize_decay_ga_consistency.py --mode sharpe --population 30 --generations 20
+  python optimize_decay_ga_consistency.py --mode roi --output roi_results.json
+        """
+    )
+    parser.add_argument('--mode', type=str, default='combined',
+                        choices=['combined', 'sharpe', 'roi', 'brier'],
+                        help='Optimization mode (default: combined)')
+    parser.add_argument('--population', type=int, default=20,
+                        help='Population size (default: 20)')
+    parser.add_argument('--generations', type=int, default=15,
+                        help='Number of generations (default: 15)')
+    parser.add_argument('--output', type=str, default=None,
+                        help='Output JSON file (default: decay_ga_{mode}_results.json)')
+    
+    args = parser.parse_args()
+    
+    # Select evaluation function based on mode
+    fitness_functions = {
+        'combined': evaluate_consistency_fitness,
+        'sharpe': evaluate_sharpe_fitness,
+        'roi': evaluate_roi_fitness,
+        'brier': evaluate_brier_fitness
+    }
+    
+    eval_function = fitness_functions[args.mode]
+    
+    # Set output file
+    if args.output is None:
+        output_file = f'decay_ga_{args.mode}_results.json'
+    else:
+        output_file = args.output
+    
     print("=" * 80)
-    print("CONSISTENCY-FOCUSED DECAY PARAMETER OPTIMIZATION")
+    print(f"DECAY PARAMETER OPTIMIZATION - {args.mode.upper()} MODE")
     print("=" * 80)
-    print("\nObjective: Find parameters with stable, well-calibrated performance")
-    print("Method: Optimize Sharpe ratio, calibration, and trend stability on validation")
+    print(f"\nOptimization mode: {args.mode}")
+    
+    mode_descriptions = {
+        'combined': 'Sharpe ratio + mean ROI + trend stability + calibration',
+        'sharpe': 'Pure Sharpe ratio across validation windows',
+        'roi': 'Direct mean ROI optimization',
+        'brier': 'Brier score-based optimization (calibration-focused)'
+    }
+    print(f"Description: {mode_descriptions[args.mode]}")
+    print("Method: Optimize on validation data only")
     print("OOS data: Completely untouched - used only for final evaluation\n")
     
     # Set up DEAP
@@ -309,14 +556,15 @@ def main():
                      toolbox.decay_days, toolbox.decay_rate), n=1)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     
-    toolbox.register("evaluate", evaluate_consistency_fitness)
+    # Register the selected evaluation function
+    toolbox.register("evaluate", eval_function)
     toolbox.register("mate", tools.cxBlend, alpha=0.5)
     toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=0.2, indpb=0.3)
     toolbox.register("select", tools.selTournament, tournsize=3)
     
     # GA parameters
-    POPULATION_SIZE = 20
-    GENERATIONS = 15
+    POPULATION_SIZE = args.population
+    GENERATIONS = args.generations
     CXPB = 0.7
     MUTPB = 0.3
     
@@ -432,6 +680,13 @@ def main():
     df_train['DATE'] = pd.to_datetime(df_train['DATE'])
     df_train = df_train.sort_values('DATE').reset_index(drop=True)
     
+    # Add bout counts if not already present
+    df_train = add_bout_counts(df_train)
+    
+    # Ensure bout count columns are numeric
+    df_train['precomp_boutcount'] = pd.to_numeric(df_train['precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+    df_train['opp_precomp_boutcount'] = pd.to_numeric(df_train['opp_precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+    
     df_with_elo, ratings, last_fight = run_elo_with_params(
         df_train, k=170, base_elo=1500, denominator=400, use_mov=True,
         quick_succession_days=best_ever['quick_succession_days'],
@@ -499,7 +754,8 @@ def main():
     
     # Save results
     results = {
-        'optimization_type': 'consistency_focused_ga',
+        'optimization_type': f'{args.mode}_ga',
+        'optimization_mode': args.mode,
         'best_parameters': best_ever,
         'validation_performance': {
             'roi': float(val_roi),
@@ -516,11 +772,11 @@ def main():
         'generation_history': best_individuals
     }
     
-    with open('decay_ga_consistency_results.json', 'w') as f:
+    with open(output_file, 'w') as f:
         json.dump(results, f, indent=2)
     
     print(f"\n{'='*80}")
-    print("Results saved to: decay_ga_consistency_results.json")
+    print(f"Results saved to: {output_file}")
     print(f"{'='*80}\n")
 
 
