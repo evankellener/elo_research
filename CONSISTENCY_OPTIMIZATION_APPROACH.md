@@ -53,7 +53,9 @@ Fitness = Sharpe_ratio + 0.1 * max(mean_ROI, 0)
 
 ## Implementation
 
-### Script: `optimize_decay_ga_consistency_final.py`
+### Script: `optimize_decay_ga_consistency_FINAL.py` (Recommended)
+
+> **Note**: There are multiple versions of the consistency optimization script. See [docs/OPTIMIZE_DECAY_GA_CONSISTENCY_FILES.md](docs/OPTIMIZE_DECAY_GA_CONSISTENCY_FILES.md) for a detailed comparison. The `_FINAL.py` version is the recommended production implementation.
 
 **Key Features:**
 - Rolling window analysis on validation data only
