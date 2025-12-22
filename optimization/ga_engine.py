@@ -620,9 +620,9 @@ def create_elo_fitness_function(
             # Simple accuracy
             pred_labels = (predictions > 0.5).astype(int)
             fitness = np.mean(pred_labels == actuals)
-            # Add calibration bonus if enabled
-            fitness += calibration_bonus
-        
+            # Add calibration bonus if enabled and clamp to valid range
+            fitness = max(0.0, min(1.0, fitness + calibration_bonus))
+
         elif optimize_for == "roi":
             # Realistic ROI calculation with implied odds based on prediction probabilities
             # Place bet on every valid fight (regardless of confidence threshold)
@@ -632,14 +632,14 @@ def create_elo_fitness_function(
                 # Determine predicted winner and their win probability
                 pred_winner = 1 if pred > 0.5 else 0
                 pred_prob = pred if pred > 0.5 else (1 - pred)
-                
+
                 # Calculate realistic payout based on implied odds
                 # If pred_prob = 0.7 (70% favorite): payout = 1/0.7 - 1 ≈ 0.43 (bet $1 to win $0.43)
                 # If pred_prob = 0.3 (30% underdog): payout = 1/0.3 - 1 ≈ 2.33 (bet $1 to win $2.33)
                 # Clamp probability to avoid division by very small numbers
                 pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
                 payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
-                
+
                 # We always bet 1 unit
                 if pred_winner == actual:
                     # Win: get back bet + payout
@@ -648,15 +648,14 @@ def create_elo_fitness_function(
                     # Lose: lose the bet
                     total_profit -= 1.0
                 total_bets += 1
-            
+
             # If no bets were made, return worst possible ROI (-1.0)
             # This ensures models that make no predictions are penalized
             # rather than appearing as "break-even" (0.0)
             roi = (total_profit / total_bets) if total_bets > 0 else -1.0
-            fitness = roi
-            # Add calibration bonus if enabled (scaled to ROI range)
-            fitness += calibration_bonus
-        
+            # Add calibration bonus if enabled (scaled to ROI range) and clamp back to [-1, 1]
+            fitness = max(-1.0, min(1.0, roi + calibration_bonus))
+
         elif optimize_for == "log_loss":
             # Log Loss (lower is better, so we invert it for GA maximization)
             eps = 1e-15
@@ -672,14 +671,14 @@ def create_elo_fitness_function(
             # Poor: log_loss>0.693 -> fitness<0.5
             # This allows GA to distinguish between different "bad" models
             fitness = np.exp(-log_loss)
-            # Add calibration bonus if enabled
-            fitness += calibration_bonus
-        
+            # Add calibration bonus if enabled and keep within (0, 1]
+            fitness = max(1e-15, min(1.0, fitness + calibration_bonus))
+
         else:  # composite
             # Accuracy component
             pred_labels = (predictions > 0.5).astype(int)
             accuracy = np.mean(pred_labels == actuals)
-            
+
             # Log Loss component (lower is better, so invert and scale)
             eps = 1e-15
             predictions_clipped = np.clip(predictions, eps, 1 - eps)
@@ -689,38 +688,38 @@ def create_elo_fitness_function(
             )
             # Use exponential mapping: log_loss=0 -> 1.0, log_loss=0.693 -> ~0.5
             log_loss_score = np.exp(-log_loss)
-            
+
             # Brier Score component (lower is better, so invert)
             brier_score = np.mean((predictions - actuals) ** 2)
             # Scale: perfect = 0, random = 0.25, invert to make higher better
             brier_score_score = max(0, 1.0 - brier_score / 0.25)
-            
+
             # ROI component - place bet on every valid fight (no confidence threshold)
             total_profit = 0
             total_bets = 0
-            
+
             for pred, actual in zip(predictions, actuals):
                 # Determine predicted winner and their win probability
                 pred_winner = 1 if pred > 0.5 else 0
                 pred_prob = pred if pred > 0.5 else (1 - pred)
-                
+
                 # Calculate realistic payout based on implied odds
                 # Clamp probability to avoid division by very small numbers
                 pred_prob_clamped = max(pred_prob, MIN_BET_PROBABILITY)
                 payout_multiplier = (1.0 / pred_prob_clamped) - 1.0
-                
+
                 if pred_winner == actual:
                     total_profit += payout_multiplier
                 else:
                     total_profit -= 1.0
                 total_bets += 1
-            
+
             # If no bets were made, return worst possible ROI (-1.0)
             # This ensures models that make no predictions are penalized
             roi = (total_profit / total_bets) if total_bets > 0 else -1.0
             # Scale ROI: -1.0 to 1.0 -> 0.0 to 1.0
             roi_score = (roi + 1.0) / 2.0
-            
+
             # Combine with weights
             fitness = (
                 fitness_weights.get('accuracy', 0.3) * accuracy +
@@ -728,8 +727,8 @@ def create_elo_fitness_function(
                 fitness_weights.get('brier_score', 0.2) * brier_score_score +
                 fitness_weights.get('roi', 0.3) * roi_score
             )
-            # Add calibration bonus if enabled
-            fitness += calibration_bonus
+            # Add calibration bonus if enabled and clamp to [0, 1]
+            fitness = max(0.0, min(1.0, fitness + calibration_bonus))
         
         return fitness
     
