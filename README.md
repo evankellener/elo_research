@@ -232,6 +232,48 @@ python optimization/ga_time_split_roi.py --population-size 80 --generations 150
 - `ga_roi_best_params.txt` - Best parameters found
 - `images/ga_roi_results.png` - ROI visualization plots
 
+#### Option D: Decay Parameter Optimization (Advanced) 🆕
+
+Optimize rating decay parameters for consistent performance across time windows:
+
+```bash
+# Default: Combined optimization (Sharpe + ROI + trend + calibration)
+python optimize_decay_ga_consistency.py
+
+# Pure Sharpe ratio optimization (maximize risk-adjusted returns)
+python optimize_decay_ga_consistency.py --mode sharpe
+
+# Direct ROI optimization
+python optimize_decay_ga_consistency.py --mode roi
+
+# Brier score optimization (calibration-focused)
+python optimize_decay_ga_consistency.py --mode brier
+
+# Customize population and generations
+python optimize_decay_ga_consistency.py --mode sharpe --population 30 --generations 20
+
+# Specify custom output file
+python optimize_decay_ga_consistency.py --mode combined --output my_results.json
+```
+
+**What it optimizes:**
+- Quick succession days (20-120): Days threshold for quick succession bonus
+- Quick succession bump (1.01-1.15): Rating multiplier for active fighters
+- Decay days (180-720): Days before ratings start decaying
+- Decay rate (0.0001-0.01): Rate at which ratings decay over time
+
+**Optimization Modes:**
+- `combined` (default): Balances Sharpe ratio, mean ROI, trend stability, and calibration
+- `sharpe`: Pure Sharpe ratio for consistent risk-adjusted returns
+- `roi`: Direct mean ROI optimization
+- `brier`: Brier score-based for probability calibration
+
+**Runtime:** 20-40 minutes depending on population size and generations
+
+**Output:** JSON file with best parameters, validation metrics, and generation history
+
+**See also:** `docs/OPTIMIZE_DECAY_GA_CONSISTENCY_FILES.md` for detailed documentation and migration guide from legacy scripts.
+
 ### 3. Detailed Documentation
 
 For comprehensive information about GA optimization, see:
