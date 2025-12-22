@@ -51,6 +51,7 @@ This will install:
 - numpy (numerical computing)
 - matplotlib (visualization)
 - scikit-learn (machine learning metrics)
+- deap (genetic algorithm framework for parameter optimization)
 
 ### Data Requirements
 
@@ -434,6 +435,15 @@ fitness_weights = {'accuracy': 0.15, 'log_loss': 0.2, 'brier_score': 0.15, 'roi'
 - Parameter evolution over generations
 - Best parameter combination
 - Comparison with grid search baseline
+
+**What is DEAP?**
+
+Some experimental optimization scripts (e.g., `optimize_decay_ga*.py`) use [DEAP](https://github.com/DEAP/deap) (Distributed Evolutionary Algorithms in Python), a popular genetic algorithm framework. DEAP provides:
+- Pre-built genetic algorithm components (selection, crossover, mutation operators)
+- Tools for defining fitness functions and individual representations
+- Support for multi-objective optimization
+
+However, the main optimization scripts in `optimization/` directory use a custom implementation (`ga_engine.py`) that provides more control and better integration with the Elo system. The DEAP-based scripts are primarily used for experimental decay parameter optimization (see `CONSISTENCY_OPTIMIZATION_APPROACH.md` for details).
 
 #### Grid Search Baseline (optimal_k_with_mov.py)
 
