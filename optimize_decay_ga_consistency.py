@@ -16,7 +16,7 @@ import random
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from elo.elo_utils import method_of_victory_scale, apply_multiphase_decay
+from elo.elo_utils import method_of_victory_scale, apply_multiphase_decay, add_bout_counts
 
 def american_odds_to_decimal(odds):
     """Convert American odds to decimal odds."""
@@ -99,8 +99,8 @@ def run_elo_with_params(df, k=170, base_elo=1500, denominator=400, use_mov=True,
 
 def calculate_calibration_metrics(df):
     """Calculate Expected Calibration Error and Brier Score."""
-    # Filter to fighters with boutcount > 1
-    df_eval = df[(df['boutcount'] > 1) & (df['opp_boutcount'] > 1)].copy()
+    # Filter to fighters with precomp_boutcount > 1
+    df_eval = df[(df['precomp_boutcount'] > 1) & (df['opp_precomp_boutcount'] > 1)].copy()
     
     if len(df_eval) == 0:
         return float('inf'), float('inf')
@@ -134,8 +134,8 @@ def calculate_calibration_metrics(df):
 
 def calculate_window_roi(df_window, oos_df=None):
     """Calculate ROI for a time window."""
-    # Filter to fighters with boutcount > 1
-    df_eval = df_window[(df_window['boutcount'] > 1) & (df_window['opp_boutcount'] > 1)].copy()
+    # Filter to fighters with precomp_boutcount > 1
+    df_eval = df_window[(df_window['precomp_boutcount'] > 1) & (df_window['opp_precomp_boutcount'] > 1)].copy()
     
     if len(df_eval) == 0:
         return 0.0, 0
@@ -144,7 +144,7 @@ def calculate_window_roi(df_window, oos_df=None):
     # For OOS, use market odds if available
     if oos_df is not None and 'avg_odds' in oos_df.columns:
         # This is OOS evaluation
-        df_eval = oos_df[(oos_df['boutcount'] > 1) & (oos_df['opp_boutcount'] > 1)].copy()
+        df_eval = oos_df[(oos_df['precomp_boutcount'] > 1) & (oos_df['opp_precomp_boutcount'] > 1)].copy()
         df_eval = df_eval[df_eval['avg_odds'].notna()].copy()
         
         if len(df_eval) == 0:
@@ -188,6 +188,13 @@ def evaluate_consistency_fitness(individual):
         df_train = pd.read_csv('data/interleaved_cleaned.csv', low_memory=False)
         df_train['DATE'] = pd.to_datetime(df_train['DATE'])
         df_train = df_train.sort_values('DATE').reset_index(drop=True)
+        
+        # Add bout counts if not already present
+        df_train = add_bout_counts(df_train)
+        
+        # Ensure bout count columns are numeric
+        df_train['precomp_boutcount'] = pd.to_numeric(df_train['precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+        df_train['opp_precomp_boutcount'] = pd.to_numeric(df_train['opp_precomp_boutcount'], errors='coerce').fillna(0).astype(int)
         
         # Run Elo on full training data
         df_with_elo, ratings, last_fight = run_elo_with_params(
@@ -447,6 +454,13 @@ def main():
         df_oos['DATE'] = pd.to_datetime(df_oos['DATE'])
         df_oos = df_oos.sort_values('DATE').reset_index(drop=True)
         
+        # Add bout counts if not already present
+        df_oos = add_bout_counts(df_oos)
+        
+        # Ensure bout count columns are numeric
+        df_oos['precomp_boutcount'] = pd.to_numeric(df_oos['precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+        df_oos['opp_precomp_boutcount'] = pd.to_numeric(df_oos['opp_precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+        
         # Merge with Elo ratings
         df_oos['precomp_elo'] = df_oos['FIGHTER'].map(ratings).fillna(1500)
         df_oos['opp_precomp_elo'] = df_oos['opp_FIGHTER'].map(ratings).fillna(1500)
@@ -458,7 +472,7 @@ def main():
         
         oos_roi, oos_n = calculate_window_roi(None, df_oos)
         
-        df_oos_eval = df_oos[(df_oos['boutcount'] > 1) & (df_oos['opp_boutcount'] > 1)].copy()
+        df_oos_eval = df_oos[(df_oos['precomp_boutcount'] > 1) & (df_oos['opp_precomp_boutcount'] > 1)].copy()
         oos_acc = ((df_oos_eval['result'] == (df_oos_eval['win_prob'] > 0.5).astype(int)).sum() / 
                    len(df_oos_eval) * 100) if len(df_oos_eval) > 0 else 0
         
