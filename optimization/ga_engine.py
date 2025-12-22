@@ -46,7 +46,9 @@ class Individual:
         self.fitness = None
         
     def __repr__(self):
-        return f"Individual(fitness={self.fitness:.4f if self.fitness else 'None'}, genes={self.genes})"
+        # Avoid formatting errors when fitness is None
+        fitness_display = f"{self.fitness:.4f}" if self.fitness is not None else "None"
+        return f"Individual(fitness={fitness_display}, genes={self.genes})"
     
     def copy(self):
         """Create a deep copy of this individual."""
