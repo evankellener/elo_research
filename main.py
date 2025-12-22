@@ -3,13 +3,25 @@ import numpy as np
 import argparse
 import random
 from collections import defaultdict
+
 from elo.calculator import run_basic_elo, run_basic_elo_with_mov
 from elo.visualization import display_top_n_elos, most_recent_elo, graph_fighter_elo_history
 from elo.elo_utils import add_bout_counts
+from scripts import main as scripts_main
 
 # Minimum probability for betting odds calculation (prevents extreme payouts)
 # 0.01 = 1% probability = 99:1 maximum odds
 MIN_BET_PROBABILITY = 0.01
+
+# Re-export analytics helpers that live in scripts/main.py for backward compatibility
+# with existing callers and the test suite.
+american_odds_to_decimal = scripts_main.american_odds_to_decimal
+compute_roi_predictions = scripts_main.compute_roi_predictions
+compute_roi_over_time = scripts_main.compute_roi_over_time
+compare_odds_sources = scripts_main.compare_odds_sources
+analyze_random_events = scripts_main.analyze_random_events
+display_detailed_event_analysis = scripts_main.display_detailed_event_analysis
+get_method_of_victory = scripts_main.get_method_of_victory
 
 def calculate_roi(df, denominator=400, confidence_threshold=50, validation_percentile=0.8, use_bout_filter=False):
     """

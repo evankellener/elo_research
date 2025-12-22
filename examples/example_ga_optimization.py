@@ -241,8 +241,12 @@ def test_out_of_sample_metrics(
         result['brier_score'] = brier_score
         result['ece'] = ece
         result['sharpe_ratio'] = sharpe_ratio
-    
+
     return result
+
+
+# Prevent pytest from treating this helper as a collected test while keeping it importable
+test_out_of_sample_metrics.__test__ = False
 
 
 def example_basic_optimization(optimize_for="accuracy", include_calibration=False):
@@ -367,6 +371,18 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
         }
         metric_name = metric_names.get(optimize_for, "fitness")
         print(f"Best {metric_name}: {best_individual.fitness:.4f}")
+
+    print("\nExplanation of results:")
+    print("  • The GA is trained on a time-based validation split (last 20% of training data).")
+    print("  • 'Best' values above reflect validation performance used for evolution.")
+    print("  • The OUT-OF-SAMPLE section below reports metrics on past3_events.csv.")
+    if optimize_for == "roi":
+        print("  • ROI fitness is the average return per $1 bet on the validation set.")
+        print("    Positive values mean profit, negative values mean loss; ±1.0 are hard bounds.")
+    elif optimize_for == "log_loss":
+        print("  • GA fitness internally uses exp(-log_loss); the printed log loss is the raw metric.")
+    else:
+        print("  • Accuracy/composite fitness values are bounded between 0 and 1.")
     
     # Add explanatory note for log_loss
     if optimize_for == "log_loss":
@@ -435,7 +451,18 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
         print(f"Visualization saved to: {plot_filename}")
     except Exception as e:
         print(f"Warning: Could not generate plots: {e}")
-    
+
+    # Provide a short interpretation guide for the printed numbers
+    print("\nHow to read these results:")
+    print("  • Best metrics shown above come from the validation slice used during GA search.")
+    print("  • OOS metrics show generalization on past3_events.csv (not seen during training).")
+    print("  • Accuracy: proportion of correct winners. 0.5 ≈ coin flip; above that is better.")
+    print("  • ROI: average betting return per $1 when betting every fight.")
+    print("    Positive ROI means profit; negative ROI means loss. Bounds are roughly -1.0 to +1.0.")
+    print("  • Log loss: lower raw log-loss is better; fitness shown during GA is exp(-log_loss).")
+    if include_calibration:
+        print("  • Brier/ECE: lower means probabilities match reality better. Sharpe > 0 is preferable.")
+
     return best_individual, ga
 
 

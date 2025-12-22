@@ -1,7 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-from elo_utils import method_of_victory_scale, build_fighter_history, has_prior_history, is_true
+from elo.elo_utils import method_of_victory_scale, build_fighter_history, has_prior_history, is_true
 
 def run_basic_elo_with_mov(df, k = 167.19618191211478, base_elo = 1500, denominator = 400, draw_k_factor = 0.5, 
                            w_ko=None, w_sub=None, w_udec=None, w_sdec=None, w_mdec=None):
