@@ -259,12 +259,11 @@ def evaluate_consistency_fitness(individual):
         std_roi = np.std(window_rois)
         
         # Sharpe ratio (reward per unit risk)
-        # Add epsilon to prevent division by near-zero, which causes extremely high fitness values
+        # Cap Sharpe ratio to prevent fitness explosion from near-zero or small std values
         if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):  # Avoid division by zero or very small values
-            # Cap the Sharpe ratio to prevent fitness explosion
             sharpe = min(MAX_SHARPE_RATIO, mean_roi / EPSILON_THRESHOLD) if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
         else:
-            sharpe = mean_roi / std_roi
+            sharpe = min(MAX_SHARPE_RATIO, mean_roi / std_roi)  # Cap even for normal std values
         
         # Calibration quality (lower is better, so negate)
         if len(window_calibrations) > 0:
@@ -350,10 +349,11 @@ def evaluate_sharpe_fitness(individual):
         std_roi = np.std(window_rois)
         
         # Pure Sharpe ratio with epsilon protection
+        # Cap Sharpe ratio to prevent fitness explosion
         if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):
             sharpe = min(MAX_SHARPE_RATIO, mean_roi / EPSILON_THRESHOLD) if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
         else:
-            sharpe = mean_roi / std_roi
+            sharpe = min(MAX_SHARPE_RATIO, mean_roi / std_roi)  # Cap even for normal std values
         
         # Small bonus for positive mean ROI
         if mean_roi > 0:
