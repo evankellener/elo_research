@@ -192,9 +192,9 @@ def evaluate_consistency_fitness(individual):
     3. Calibration quality (low ECE and Brier)
     4. Trend stability (penalize high volatility)
     
-    Note: Data is loaded within each fitness function to maintain DEAP compatibility.
-    While this creates some overhead, it ensures thread-safety and allows the GA
-    framework to potentially parallelize evaluations in the future.
+    Note: Data is loaded within each fitness function to maintain simplicity and avoid
+    global state. While this creates some overhead, it keeps the fitness function 
+    self-contained and compatible with DEAP's function signature requirements.
     """
     quick_succession_days, quick_succession_bump, decay_days, decay_rate = individual
     
@@ -457,7 +457,8 @@ def evaluate_brier_fitness(individual):
         
         # Sharpe-like ratio: -mean_brier / std_brier (negative because lower is better)
         if std_brier < EPSILON_THRESHOLD or not np.isfinite(std_brier):
-            fitness = -mean_brier * 100 if (mean_brier > 0 and np.isfinite(mean_brier)) else MIN_FITNESS
+            # Brier score ranges from 0 (perfect) to 1 (worst)
+            fitness = -mean_brier * 100 if (mean_brier <= 1 and np.isfinite(mean_brier)) else MIN_FITNESS
         else:
             fitness = -mean_brier / std_brier
         
