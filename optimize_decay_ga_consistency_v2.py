@@ -314,12 +314,22 @@ def main():
         for child1, child2 in zip(offspring[::2], offspring[1::2]):
             if random.random() < CXPB:
                 toolbox.mate(child1, child2)
+                # Enforce bounds after crossover
+                child1[0] = max(20, min(120, child1[0]))
+                child1[1] = max(1.01, min(1.15, child1[1]))
+                child1[2] = max(180, min(720, child1[2]))
+                child1[3] = max(0.0001, min(0.01, child1[3]))
+                child2[0] = max(20, min(120, child2[0]))
+                child2[1] = max(1.01, min(1.15, child2[1]))
+                child2[2] = max(180, min(720, child2[2]))
+                child2[3] = max(0.0001, min(0.01, child2[3]))
                 del child1.fitness.values
                 del child2.fitness.values
         
         for mutant in offspring:
             if random.random() < MUTPB:
                 toolbox.mutate(mutant)
+                # Enforce bounds after mutation
                 mutant[0] = max(20, min(120, mutant[0]))
                 mutant[1] = max(1.01, min(1.15, mutant[1]))
                 mutant[2] = max(180, min(720, mutant[2]))
