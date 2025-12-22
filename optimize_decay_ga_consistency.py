@@ -260,7 +260,7 @@ def evaluate_consistency_fitness(individual):
         # Sharpe ratio (reward per unit risk)
         # Add epsilon to prevent division by near-zero, which causes extremely high fitness values
         if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):  # Avoid division by zero or very small values
-            sharpe = mean_roi if mean_roi > 0 else MIN_FITNESS
+            sharpe = mean_roi if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
         else:
             sharpe = mean_roi / std_roi
         
@@ -349,7 +349,7 @@ def evaluate_sharpe_fitness(individual):
         
         # Pure Sharpe ratio with epsilon protection
         if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):
-            sharpe = mean_roi if mean_roi > 0 else MIN_FITNESS
+            sharpe = mean_roi if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
         else:
             sharpe = mean_roi / std_roi
         
@@ -457,7 +457,7 @@ def evaluate_brier_fitness(individual):
         
         # Sharpe-like ratio: -mean_brier / std_brier (negative because lower is better)
         if std_brier < EPSILON_THRESHOLD or not np.isfinite(std_brier):
-            fitness = -mean_brier * 100 if mean_brier > 0 else MIN_FITNESS
+            fitness = -mean_brier * 100 if (mean_brier > 0 and np.isfinite(mean_brier)) else MIN_FITNESS
         else:
             fitness = -mean_brier / std_brier
         
