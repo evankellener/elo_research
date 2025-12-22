@@ -1,169 +1,125 @@
 # Understanding the `optimize_decay_ga_consistency` Files
 
-This document explains the multiple versions of decay parameter optimization scripts in the repository.
+This document explains the decay parameter optimization scripts in the repository.
+
+## ⭐ NEW: Unified Script (December 2024)
+
+**Use `optimize_decay_ga_consistency.py` with command-line flags**
+
+The main optimization script has been unified to support multiple optimization modes through command-line arguments:
+
+```bash
+# Show all available options
+python optimize_decay_ga_consistency.py --help
+
+# Run with different optimization modes:
+python optimize_decay_ga_consistency.py --mode combined    # Default: Sharpe + ROI + trend + calibration
+python optimize_decay_ga_consistency.py --mode sharpe      # Pure Sharpe ratio optimization
+python optimize_decay_ga_consistency.py --mode roi         # Direct ROI optimization
+python optimize_decay_ga_consistency.py --mode brier       # Brier score-based (calibration-focused)
+
+# Customize GA parameters:
+python optimize_decay_ga_consistency.py --mode sharpe --population 30 --generations 20
+python optimize_decay_ga_consistency.py --mode roi --output custom_results.json
+```
+
+### Available Optimization Modes
+
+1. **`combined`** (default): Composite fitness with Sharpe ratio, mean ROI, trend stability, and calibration
+2. **`sharpe`**: Pure Sharpe ratio optimization for consistent performance
+3. **`roi`**: Direct mean ROI optimization
+4. **`brier`**: Brier score-based optimization for probability calibration
+
+### Command-Line Options
+
+- `--mode {combined,sharpe,roi,brier}`: Optimization mode (default: combined)
+- `--population N`: Population size for GA (default: 20)
+- `--generations N`: Number of generations (default: 15)
+- `--output FILE`: Output JSON file (default: `decay_ga_{mode}_results.json`)
+
+### Fixes in Latest Version
+
+- **Fixed extremely high fitness values**: Added epsilon check to prevent division by near-zero in Sharpe ratio calculation
+- **Consolidated multiple variants**: All optimization modes now available in a single script with flags
 
 ## Background
 
-These scripts are experimental implementations for optimizing Elo rating decay parameters using genetic algorithms. They all use DEAP (the genetic algorithm framework) and focus on finding parameters that work **consistently** across different time periods, rather than just maximizing performance on a single dataset.
+These scripts optimize Elo rating decay parameters using genetic algorithms. They focus on finding parameters that work **consistently** across different time periods, rather than just maximizing performance on a single dataset.
 
 See `CONSISTENCY_OPTIMIZATION_APPROACH.md` for the research methodology behind these experiments.
 
-## The Files Explained
+## The Parameters Being Optimized
 
-### Core Concept
-All these files optimize 4 decay parameters:
+All optimization modes optimize 4 decay parameters:
 1. **quick_succession_days** (20-120): Days threshold for quick succession bonus
 2. **quick_succession_bump** (1.01-1.15): Rating multiplier for fighters who compete frequently
 3. **decay_days** (180-720): Days before ratings start decaying
 4. **decay_rate** (0.0001-0.01): Rate at which ratings decay over time
 
-### File Breakdown
+## Legacy Files (Historical Reference)
 
-#### 1. `optimize_decay_ga_consistency.py` (505 lines)
-**Purpose**: Original consistency-focused optimization  
-**Fitness Function**: Composite metric combining:
-- Mean ROI across validation windows
-- Sharpe ratio (mean/std of ROI)
-- Calibration quality (ECE, Brier score)
-- Trend stability
+The following files are older variants that have been consolidated into the unified script:
 
-**Status**: Base implementation with multiple fitness components
+### `optimize_decay_ga_consistency_FINAL.py` (408 lines)
+**Purpose**: Sharpe ratio optimization  
+**Fitness Function**: `Sharpe_ratio = mean_ROI / std_ROI`  
+**Status**: ⚠️ Superseded by unified script with `--mode sharpe`
 
----
+### `optimize_decay_ga_consistency_WORKING.py` (450 lines)
+**Purpose**: Brier score consistency optimization  
+**Fitness Function**: `-mean_brier / std_brier`  
+**Status**: ⚠️ Superseded by unified script with `--mode brier`
 
-#### 2. `optimize_decay_ga_consistency_FINAL.py` (408 lines) ⭐
-**Purpose**: Sharpe ratio optimization (recommended approach)  
-**Fitness Function**: `Sharpe_ratio = mean_ROI / std_ROI` across rolling validation windows  
-**Key Features**:
-- Splits validation into quarterly windows
-- Optimizes for consistent performance (low volatility)
-- Clean implementation with parameter bounds checking
-- Mentioned in `CONSISTENCY_OPTIMIZATION_APPROACH.md` as the primary script
+### Other Variants
+- `optimize_decay_ga_consistency_final.py` - Earlier Sharpe implementation
+- `optimize_decay_ga_consistency_final_v2.py` - Experimental iteration
+- `optimize_decay_ga_consistency_robust.py` - Enhanced error handling
+- `optimize_decay_ga_consistency_v2.py` - Legacy basic GA
+- `optimize_decay_ga_consistency_working.py` - Development copy
 
-**Status**: ✅ Production-ready, documented approach
+**Recommendation**: These legacy files can be archived or removed as their functionality is now available in the unified script.
 
----
+## Migration Guide
 
-#### 3. `optimize_decay_ga_consistency_WORKING.py` (450 lines)
-**Purpose**: Alternative approach using Brier score consistency  
-**Fitness Function**: `-mean_brier / std_brier` (Sharpe-like for calibration)  
-**Key Features**:
-- Optimizes for low and consistent Brier scores
-- Focus on probability calibration rather than ROI
-- Similar structure to FINAL but different optimization target
+If you were using an old script, here's how to migrate to the unified version:
 
-**Status**: Working alternative for calibration-focused optimization
+| Old Script | New Command |
+|------------|-------------|
+| `optimize_decay_ga_consistency_FINAL.py` | `python optimize_decay_ga_consistency.py --mode sharpe` |
+| `optimize_decay_ga_consistency_WORKING.py` | `python optimize_decay_ga_consistency.py --mode brier` |
+| Original base script with composite | `python optimize_decay_ga_consistency.py --mode combined` |
 
----
+## Output
 
-#### 4. `optimize_decay_ga_consistency_final.py` (367 lines)
-**Purpose**: Streamlined Sharpe ratio optimization  
-**Fitness Function**: Sharpe ratio with simpler implementation  
-**Key Features**:
-- Cleaner, more minimal code
-- Same concept as FINAL but with fewer validation checks
-- Earlier version before robust error handling was added
+All modes produce a JSON results file containing:
+- Best parameters found
+- Fitness score
+- Validation performance metrics (ROI, accuracy, ECE, Brier)
+- Out-of-sample performance (if available)
+- Generation history
 
-**Status**: Working but superseded by FINAL
+Default output files: `decay_ga_{mode}_results.json`
 
----
-
-#### 5. `optimize_decay_ga_consistency_final_v2.py` (407 lines)
-**Purpose**: Variant of FINAL with modifications  
-**Fitness Function**: Sharpe ratio (similar to FINAL)  
-**Status**: Experimental iteration
-
----
-
-#### 6. `optimize_decay_ga_consistency_robust.py` (400 lines)
-**Purpose**: Enhanced error handling version  
-**Fitness Function**: Sharpe ratio with robust error handling  
-**Key Features**:
-- Additional numerical stability checks
-- Better handling of edge cases
-- More defensive programming
-
-**Status**: Experimental robustness improvements
-
----
-
-#### 7. `optimize_decay_ga_consistency_v2.py` (402 lines)
-**Purpose**: Earlier version with basic GA implementation  
-**Docstring**: "Genetic Algorithm-based decay parameter optimization"  
-**Status**: ⚠️ Legacy/deprecated - superseded by consistency-focused versions
-
----
-
-#### 8. `optimize_decay_ga_consistency_working.py` (402 lines)
-**Purpose**: Development/testing version  
-**Status**: ⚠️ Likely a working copy during development
-
----
-
-## Which One Should You Use?
-
-### For Production Use:
-**Use `optimize_decay_ga_consistency_FINAL.py`** ⭐
-
-This is the primary implementation mentioned in the research documentation. It:
-- Has clean, well-tested code
-- Uses the Sharpe ratio approach for consistency
-- Is properly documented in `CONSISTENCY_OPTIMIZATION_APPROACH.md`
-- Has robust parameter bounds checking
-
-### For Experimentation:
-- **`optimize_decay_ga_consistency_WORKING.py`**: If you want to optimize for calibration (Brier score) instead of ROI
-- **`optimize_decay_ga_consistency.py`**: If you want a composite fitness function with multiple metrics
-
-## Recommendations for Cleanup
-
-To reduce confusion, consider:
-
-1. **Keep**:
-   - `optimize_decay_ga_consistency_FINAL.py` (primary production script)
-   - `optimize_decay_ga_consistency_WORKING.py` (calibration alternative)
-   - `optimize_decay_ga_consistency.py` (composite fitness baseline)
-
-2. **Archive or Remove**:
-   - `optimize_decay_ga_consistency_final.py` (superseded by FINAL)
-   - `optimize_decay_ga_consistency_final_v2.py` (experimental iteration)
-   - `optimize_decay_ga_consistency_v2.py` (legacy version)
-   - `optimize_decay_ga_consistency_working.py` (development copy)
-   - `optimize_decay_ga_consistency_robust.py` (experimental variant)
-
-3. **Add to Documentation**:
-   - Update `CONSISTENCY_OPTIMIZATION_APPROACH.md` to mention which script to use
-   - Add this file to the docs/ directory for future reference
-
-## Running the Scripts
-
-All scripts follow a similar pattern:
+## Examples
 
 ```bash
-# Primary recommended approach
-python optimize_decay_ga_consistency_FINAL.py
+# Quick test with fewer generations
+python optimize_decay_ga_consistency.py --mode sharpe --generations 5 --population 10
 
-# For calibration-focused optimization
-python optimize_decay_ga_consistency_WORKING.py
+# Full optimization with custom output
+python optimize_decay_ga_consistency.py --mode combined --generations 20 --population 30 --output full_optimization.json
+
+# Calibration-focused optimization
+python optimize_decay_ga_consistency.py --mode brier --output calibration_results.json
 ```
 
-They will:
-1. Load data from `data/interleaved_cleaned.csv`
-2. Split into training/validation (never touching OOS)
-3. Run genetic algorithm optimization
-4. Output best parameters and validation performance
-5. Perform final blind test on OOS data (if available)
+## Troubleshooting
 
-## Key Differences Summary
+### Extremely High Fitness Values
+This issue has been fixed in the latest version. The Sharpe ratio calculation now includes an epsilon check to prevent division by near-zero standard deviations.
 
-| File | Primary Metric | Focus | Status |
-|------|---------------|-------|--------|
-| `_FINAL.py` | Sharpe ratio (ROI) | Profit consistency | ✅ Production |
-| `_WORKING.py` | Sharpe ratio (Brier) | Calibration consistency | ✅ Alternative |
-| `.py` (base) | Composite | Multiple objectives | ✅ Research |
-| `_final.py` | Sharpe ratio (ROI) | Simpler version | ⚠️ Superseded |
-| `_final_v2.py` | Sharpe ratio | Experimental | ⚠️ Experimental |
-| `_robust.py` | Sharpe ratio | Error handling | ⚠️ Experimental |
-| `_v2.py` | Basic | Legacy | ⚠️ Deprecated |
-| `_working.py` | Unknown | Dev copy | ⚠️ Unclear |
+### Missing Data Files
+Ensure `data/interleaved_cleaned.csv` exists in your repository. For out-of-sample evaluation, `data/past3_events.csv` should also be available.
 
+### Long Runtime
+Reduce `--generations` and `--population` for faster testing. Default values (15 generations, 20 population) provide a good balance.
