@@ -717,11 +717,30 @@ Examples:
     # OOS metrics (if available)
     try:
         df_oos = pd.read_csv('data/past3_events.csv', low_memory=False)
+        
+        # Normalize column names to uppercase for consistency
+        column_mapping = {
+            'date': 'DATE',
+            'fighter': 'FIGHTER',
+            'opp_fighter': 'opp_FIGHTER'
+        }
+        df_oos = df_oos.rename(columns=column_mapping)
+        
+        # Ensure required columns exist
+        if 'DATE' not in df_oos.columns or 'FIGHTER' not in df_oos.columns or 'opp_FIGHTER' not in df_oos.columns:
+            raise ValueError(f"OOS file missing required columns. Found: {list(df_oos.columns)}")
+        
         df_oos['DATE'] = pd.to_datetime(df_oos['DATE'])
         df_oos = df_oos.sort_values('DATE').reset_index(drop=True)
         
         # Add bout counts if not already present
         df_oos = add_bout_counts(df_oos)
+        
+        # Verify add_bout_counts worked
+        if df_oos is None:
+            raise ValueError("add_bout_counts returned None")
+        if 'precomp_boutcount' not in df_oos.columns or 'opp_precomp_boutcount' not in df_oos.columns:
+            raise ValueError("add_bout_counts did not add required columns")
         
         # Ensure bout count columns are numeric
         df_oos['precomp_boutcount'] = pd.to_numeric(df_oos['precomp_boutcount'], errors='coerce').fillna(0).astype(int)
@@ -736,7 +755,7 @@ Examples:
         df_oos['rating_diff'] = df_oos['rating_diff'].clip(-100, 100)
         df_oos['win_prob'] = 1 / (1 + 10 ** df_oos['rating_diff'])
         
-        oos_roi, oos_n = calculate_window_roi(None, df_oos)
+        oos_roi, oos_n = calculate_window_roi(df_oos, df_oos)
         
         df_oos_eval = df_oos[(df_oos['precomp_boutcount'] > 1) & (df_oos['opp_precomp_boutcount'] > 1)].copy()
         oos_acc = ((df_oos_eval['result'] == (df_oos_eval['win_prob'] > 0.5).astype(int)).sum() / 
