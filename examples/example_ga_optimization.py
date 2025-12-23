@@ -53,6 +53,43 @@ from optimization.optimal_k_with_mov import add_bout_counts, run_basic_elo, late
 from elo.visualization import plot_ga_optimization_history
 
 
+def _print_sample_events(df: pd.DataFrame, num_events: int = 5) -> None:
+    """Print a handful of events and the fights from this training slice.
+
+    This gives visibility into the concrete bouts the GA is optimizing over.
+    """
+
+    if "EVENT" not in df.columns or df.empty:
+        print("\nNo EVENT column found; skipping event preview.")
+        return
+
+    # Reproducible sample of unique events from the filtered training data
+    events_in_order = df.dropna(subset=["EVENT"])
+    unique_events = events_in_order["EVENT"].drop_duplicates().tolist()
+
+    if not unique_events:
+        print("\nNo events available for preview after filtering.")
+        return
+
+    rng = np.random.default_rng(42)
+    selected_events = (
+        rng.choice(unique_events, size=min(num_events, len(unique_events)), replace=False)
+        if len(unique_events) > num_events
+        else unique_events
+    )
+
+    print("\nSample of events and fights used in this run:")
+    for event_name in selected_events:
+        fights = df[df["EVENT"] == event_name]
+        print(f"\n  Event: {event_name} ({len(fights)} fights)")
+        for _, row in fights.iterrows():
+            date_str = "" if "DATE" not in row or pd.isna(row["DATE"]) else pd.to_datetime(row["DATE"]).date()
+            fighter = row.get("FIGHTER", "?")
+            opponent = row.get("opp_FIGHTER", "?")
+            result = row.get("result", "?")
+            print(f"    - {date_str}: {fighter} vs {opponent} (result: {result})")
+
+
 def test_out_of_sample_metrics(
     df_trained_with_elo,
     test_df,
@@ -241,8 +278,12 @@ def test_out_of_sample_metrics(
         result['brier_score'] = brier_score
         result['ece'] = ece
         result['sharpe_ratio'] = sharpe_ratio
-    
+
     return result
+
+
+# Prevent pytest from treating this helper as a collected test while keeping it importable
+test_out_of_sample_metrics.__test__ = False
 
 
 def example_basic_optimization(optimize_for="accuracy", include_calibration=False):
@@ -254,7 +295,7 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
         include_calibration: If True, includes calibration metrics (ECE, Brier, Sharpe) in fitness
     """
     print("="*70)
-    print("EXAMPLE: BASIC GA OPTIMIZATION (K-factor + Denominator)")
+    print("EXAMPLE: BASIC GA OPTIMIZATION (K-factor + Denominator + MOV Weights)")
     print("="*70)
     print(f"\nOptimization mode: {optimize_for}")
     if include_calibration:
@@ -278,14 +319,21 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
         df["precomp_boutcount"] = pd.to_numeric(df["precomp_boutcount"], errors="coerce")
     if "opp_precomp_boutcount" in df.columns:
         df["opp_precomp_boutcount"] = pd.to_numeric(df["opp_precomp_boutcount"], errors="coerce")
-    
+
     print(f"Using {len(df)} fights for optimization")
     print(f"Loaded {len(test_df)} fights for out-of-sample testing")
+
+    _print_sample_events(df)
     
     # Define parameter space
     param_bounds = {
         'k': (10, 500),
-        'denominator': (200, 600)
+        'denominator': (200, 600),
+        'w_ko': (0.8, 1.8),
+        'w_sub': (0.8, 1.8),
+        'w_udec': (0.7, 1.3),
+        'w_mdec': (0.6, 1.2),
+        'w_sdec': (0.4, 1.1),
     }
     
     # Create fitness function
@@ -319,12 +367,17 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
     
     # Recalculate Elo ratings with best parameters on full training data
     print("\nRecalculating Elo ratings with best parameters...")
+    mov_param_keys = ["w_ko", "w_sub", "w_udec", "w_mdec", "w_sdec"]
+    best_mov_params = {k: v for k, v in best_individual.genes.items() if k in mov_param_keys}
+    use_mov = bool(best_mov_params)
+
     df_with_best_elo = run_basic_elo(
         df.copy(),
         k=best_individual.genes['k'],
         base_elo=1500,
         denominator=best_individual.genes['denominator'],
-        use_mov=False
+        use_mov=use_mov,
+        mov_params=best_mov_params if use_mov else None
     )
     
     # Test on out-of-sample data
@@ -344,6 +397,10 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
     print("="*70)
     print(f"Best K-factor: {best_individual.genes['k']:.2f}")
     print(f"Best denominator: {best_individual.genes['denominator']:.2f}")
+    if use_mov:
+        print("Best MOV weights:")
+        for key in mov_param_keys:
+            print(f"  {key}: {best_individual.genes[key]:.3f}")
     
     # Calculate mode-specific metrics once
     log_loss_value = None
@@ -367,6 +424,18 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
         }
         metric_name = metric_names.get(optimize_for, "fitness")
         print(f"Best {metric_name}: {best_individual.fitness:.4f}")
+
+    print("\nExplanation of results:")
+    print("  • The GA is trained on a time-based validation split (last 20% of training data).")
+    print("  • 'Best' values above reflect validation performance used for evolution.")
+    print("  • The OUT-OF-SAMPLE section below reports metrics on past3_events.csv.")
+    if optimize_for == "roi":
+        print("  • ROI fitness is the average return per $1 bet on the validation set.")
+        print("    Positive values mean profit, negative values mean loss; ±1.0 are hard bounds.")
+    elif optimize_for == "log_loss":
+        print("  • GA fitness internally uses exp(-log_loss); the printed log loss is the raw metric.")
+    else:
+        print("  • Accuracy/composite fitness values are bounded between 0 and 1.")
     
     # Add explanatory note for log_loss
     if optimize_for == "log_loss":
@@ -435,7 +504,18 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
         print(f"Visualization saved to: {plot_filename}")
     except Exception as e:
         print(f"Warning: Could not generate plots: {e}")
-    
+
+    # Provide a short interpretation guide for the printed numbers
+    print("\nHow to read these results:")
+    print("  • Best metrics shown above come from the validation slice used during GA search.")
+    print("  • OOS metrics show generalization on past3_events.csv (not seen during training).")
+    print("  • Accuracy: proportion of correct winners. 0.5 ≈ coin flip; above that is better.")
+    print("  • ROI: average betting return per $1 when betting every fight.")
+    print("    Positive ROI means profit; negative ROI means loss. Bounds are roughly -1.0 to +1.0.")
+    print("  • Log loss: lower raw log-loss is better; fitness shown during GA is exp(-log_loss).")
+    if include_calibration:
+        print("  • Brier/ECE: lower means probabilities match reality better. Sharpe > 0 is preferable.")
+
     return best_individual, ga
 
 

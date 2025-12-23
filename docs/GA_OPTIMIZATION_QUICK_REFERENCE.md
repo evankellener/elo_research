@@ -248,6 +248,7 @@ ga = GeneticAlgorithm(..., random_seed=42)
 4. **Compare**: Against baselines (default Elo, grid search)
 5. **Save results**: Keep logs of optimization runs
 6. **Monitor overfitting**: Training vs validation performance
+7. **MOV is neutral at 1.0**: Setting all MOV weights to 1.0 matches the no-MOV baseline. Broadening the search to MOV weights can help, but it can also overfit and reduce OOS ROI—clamp bounds to `[1.0, 1.0]` to keep behavior unchanged.
 
 ---
 

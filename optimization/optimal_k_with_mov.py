@@ -3,7 +3,15 @@ import matplotlib.pyplot as plt
 from elo.elo_utils import method_of_victory_scale, build_fighter_history, has_prior_history, add_bout_counts
 
 
-def run_basic_elo(df, k=32, base_elo=1500, denominator=400, use_mov=True, draw_k_factor=0.5):
+def run_basic_elo(
+    df,
+    k=32,
+    base_elo=1500,
+    denominator=400,
+    use_mov=True,
+    draw_k_factor=0.5,
+    mov_params=None,
+):
     """
     Core Elo loop, with optional method of victory scaling the K for each fight.
     
@@ -34,7 +42,15 @@ def run_basic_elo(df, k=32, base_elo=1500, denominator=400, use_mov=True, draw_k
 
         # method of victory multiplier (if enabled)
         if use_mov:
-            mov_scale = method_of_victory_scale(row)
+            mov_params = mov_params or {}
+            mov_scale = method_of_victory_scale(
+                row,
+                w_ko=mov_params.get("w_ko", 1.4),
+                w_sub=mov_params.get("w_sub", 1.3),
+                w_udec=mov_params.get("w_udec", 1.0),
+                w_mdec=mov_params.get("w_mdec", 0.9),
+                w_sdec=mov_params.get("w_sdec", 0.7),
+            )
             k_eff = k * mov_scale
         else:
             k_eff = k

@@ -510,6 +510,11 @@ The legacy approach performs a **grid search** over K values to find the optimal
 
 This approach helps prevent overfitting: by optimizing K based on future accuracy within the historical data, we select a K-factor that generalizes well to truly unseen events.
 
+## Testing status notes
+
+- You may see release notes or PR summaries that list **“Not run (not requested)”** in the testing section. That simply means no automated test suite was executed for that change because none was requested.
+- To run the current checks yourself, execute `python -m pytest` from the repository root (or run individual scripts under `tests/` directly) so you can verify behavior before relying on the results.
+
 ## Results
 
 ### Comprehensive Performance Analysis: With vs Without MOV
