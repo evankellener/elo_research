@@ -481,7 +481,8 @@ def create_elo_fitness_function(
         _ = params.get("confidence_threshold", 50)  # Explicitly mark as unused
         
         # MOV weights (use defaults if not in params)
-        use_mov = any(key.startswith("w_") for key in params.keys())
+        mov_params = {k: v for k, v in params.items() if k.startswith("w_")}
+        use_mov = bool(mov_params)
         
         # Run Elo with these parameters
         try:
@@ -490,7 +491,8 @@ def create_elo_fitness_function(
                 k=k,
                 base_elo=base_elo,
                 denominator=denominator,
-                use_mov=use_mov
+                use_mov=use_mov,
+                mov_params=mov_params if use_mov else None
             )
         except Exception:
             return 0.0

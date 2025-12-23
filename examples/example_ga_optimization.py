@@ -53,6 +53,43 @@ from optimization.optimal_k_with_mov import add_bout_counts, run_basic_elo, late
 from elo.visualization import plot_ga_optimization_history
 
 
+def _print_sample_events(df: pd.DataFrame, num_events: int = 5) -> None:
+    """Print a handful of events and the fights from this training slice.
+
+    This gives visibility into the concrete bouts the GA is optimizing over.
+    """
+
+    if "EVENT" not in df.columns or df.empty:
+        print("\nNo EVENT column found; skipping event preview.")
+        return
+
+    # Reproducible sample of unique events from the filtered training data
+    events_in_order = df.dropna(subset=["EVENT"])
+    unique_events = events_in_order["EVENT"].drop_duplicates().tolist()
+
+    if not unique_events:
+        print("\nNo events available for preview after filtering.")
+        return
+
+    rng = np.random.default_rng(42)
+    selected_events = (
+        rng.choice(unique_events, size=min(num_events, len(unique_events)), replace=False)
+        if len(unique_events) > num_events
+        else unique_events
+    )
+
+    print("\nSample of events and fights used in this run:")
+    for event_name in selected_events:
+        fights = df[df["EVENT"] == event_name]
+        print(f"\n  Event: {event_name} ({len(fights)} fights)")
+        for _, row in fights.iterrows():
+            date_str = "" if "DATE" not in row or pd.isna(row["DATE"]) else pd.to_datetime(row["DATE"]).date()
+            fighter = row.get("FIGHTER", "?")
+            opponent = row.get("opp_FIGHTER", "?")
+            result = row.get("result", "?")
+            print(f"    - {date_str}: {fighter} vs {opponent} (result: {result})")
+
+
 def test_out_of_sample_metrics(
     df_trained_with_elo,
     test_df,
@@ -258,7 +295,7 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
         include_calibration: If True, includes calibration metrics (ECE, Brier, Sharpe) in fitness
     """
     print("="*70)
-    print("EXAMPLE: BASIC GA OPTIMIZATION (K-factor + Denominator)")
+    print("EXAMPLE: BASIC GA OPTIMIZATION (K-factor + Denominator + MOV Weights)")
     print("="*70)
     print(f"\nOptimization mode: {optimize_for}")
     if include_calibration:
@@ -282,14 +319,21 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
         df["precomp_boutcount"] = pd.to_numeric(df["precomp_boutcount"], errors="coerce")
     if "opp_precomp_boutcount" in df.columns:
         df["opp_precomp_boutcount"] = pd.to_numeric(df["opp_precomp_boutcount"], errors="coerce")
-    
+
     print(f"Using {len(df)} fights for optimization")
     print(f"Loaded {len(test_df)} fights for out-of-sample testing")
+
+    _print_sample_events(df)
     
     # Define parameter space
     param_bounds = {
         'k': (10, 500),
-        'denominator': (200, 600)
+        'denominator': (200, 600),
+        'w_ko': (0.8, 1.8),
+        'w_sub': (0.8, 1.8),
+        'w_udec': (0.7, 1.3),
+        'w_mdec': (0.6, 1.2),
+        'w_sdec': (0.4, 1.1),
     }
     
     # Create fitness function
@@ -323,12 +367,17 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
     
     # Recalculate Elo ratings with best parameters on full training data
     print("\nRecalculating Elo ratings with best parameters...")
+    mov_param_keys = ["w_ko", "w_sub", "w_udec", "w_mdec", "w_sdec"]
+    best_mov_params = {k: v for k, v in best_individual.genes.items() if k in mov_param_keys}
+    use_mov = bool(best_mov_params)
+
     df_with_best_elo = run_basic_elo(
         df.copy(),
         k=best_individual.genes['k'],
         base_elo=1500,
         denominator=best_individual.genes['denominator'],
-        use_mov=False
+        use_mov=use_mov,
+        mov_params=best_mov_params if use_mov else None
     )
     
     # Test on out-of-sample data
@@ -348,6 +397,10 @@ def example_basic_optimization(optimize_for="accuracy", include_calibration=Fals
     print("="*70)
     print(f"Best K-factor: {best_individual.genes['k']:.2f}")
     print(f"Best denominator: {best_individual.genes['denominator']:.2f}")
+    if use_mov:
+        print("Best MOV weights:")
+        for key in mov_param_keys:
+            print(f"  {key}: {best_individual.genes[key]:.3f}")
     
     # Calculate mode-specific metrics once
     log_loss_value = None

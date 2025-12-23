@@ -599,6 +599,11 @@ w_mdec: 0.85-0.95 (slightly less decisive)
 w_sdec: 0.65-0.85 (slightly less decisive)
 ```
 
+**Neutral baseline and ROI impact**:
+- Setting all MOV weights to **1.0** yields the same ratings and ROI as running without MOV; it is a no-op baseline.
+- Adding MOV to the search space does **not guarantee** higher ROI: the GA may explore weights below/above 1.0 that help on the validation slice but hurt OOS ROI.
+- If you want to avoid MOV changing behavior while still logging the fields, clamp the GA bounds to `[1.0, 1.0]` for each weight to lock in the neutral baseline.
+
 ---
 
 ## Understanding Fitness Functions
