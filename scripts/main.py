@@ -72,7 +72,7 @@ def run_basic_elo_with_mov(df, k = 167.19618191211478, base_elo = 1500, denomina
 
     return df
 
-def run_basic_elo(df, k = 32, base_elo = 1500, denominator = 400, draw_k_factor = 0.5):
+def run_basic_elo(df, k = 10, base_elo = 1500, denominator = 600, draw_k_factor = 0.5):
     """
     Run basic Elo rating system.
     
