@@ -28,6 +28,8 @@ from elo.elo_utils import method_of_victory_scale, apply_multiphase_decay, add_b
 # Constants for fitness calculation
 EPSILON_THRESHOLD = 0.01  # Threshold to prevent division by near-zero in Sharpe ratio
 MIN_FITNESS = -1000.0  # Minimum fitness value for error cases
+MAX_SHARPE_RATIO = 20.0  # Maximum Sharpe ratio when std is very small (prevents fitness explosion)
+MAX_MEAN_ROI = 100.0  # Maximum mean ROI to prevent fitness explosion from extreme implied odds
 
 def american_odds_to_decimal(odds):
     """Convert American odds to decimal odds."""
@@ -145,18 +147,11 @@ def calculate_calibration_metrics(df):
 
 def calculate_window_roi(df_window, oos_df=None):
     """Calculate ROI for a time window."""
-    # Filter to fighters with precomp_boutcount > 1
-    df_eval = df_window[(df_window['precomp_boutcount'] > 1) & (df_window['opp_precomp_boutcount'] > 1)].copy()
-    
-    if len(df_eval) == 0:
-        return 0.0, 0
-    
     # For validation windows, use Elo-based implied odds
     # For OOS, use market odds if available
     if oos_df is not None and 'avg_odds' in oos_df.columns:
-        # This is OOS evaluation
-        df_eval = oos_df[(oos_df['precomp_boutcount'] > 1) & (oos_df['opp_precomp_boutcount'] > 1)].copy()
-        df_eval = df_eval[df_eval['avg_odds'].notna()].copy()
+        # This is OOS evaluation - df already filtered to known fighters
+        df_eval = oos_df[oos_df['avg_odds'].notna()].copy()
         
         if len(df_eval) == 0:
             return 0.0, 0
@@ -171,7 +166,15 @@ def calculate_window_roi(df_window, oos_df=None):
         
         return roi, len(df_eval)
     else:
-        # Validation - use Elo implied odds
+        # Validation - filter to fighters with precomp_boutcount > 1 and use Elo implied odds
+        if 'precomp_boutcount' in df_window.columns and 'opp_precomp_boutcount' in df_window.columns:
+            df_eval = df_window[(df_window['precomp_boutcount'] > 1) & (df_window['opp_precomp_boutcount'] > 1)].copy()
+        else:
+            df_eval = df_window.copy()
+        
+        if len(df_eval) == 0:
+            return 0.0, 0
+        
         df_eval['implied_odds'] = 1 / df_eval['win_prob']
         
         total_bet = len(df_eval)
@@ -257,12 +260,15 @@ def evaluate_consistency_fitness(individual):
         mean_roi = np.mean(window_rois)
         std_roi = np.std(window_rois)
         
+        # Cap mean_roi to prevent fitness explosion from extreme implied odds
+        capped_mean_roi = min(mean_roi, MAX_MEAN_ROI) if mean_roi > 0 else mean_roi
+        
         # Sharpe ratio (reward per unit risk)
-        # Add epsilon to prevent division by near-zero, which causes extremely high fitness values
+        # Cap Sharpe ratio to prevent fitness explosion from near-zero or small std values
         if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):  # Avoid division by zero or very small values
-            sharpe = mean_roi if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
+            sharpe = min(MAX_SHARPE_RATIO, mean_roi / EPSILON_THRESHOLD) if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
         else:
-            sharpe = mean_roi / std_roi
+            sharpe = min(MAX_SHARPE_RATIO, mean_roi / std_roi)  # Cap even for normal std values
         
         # Calibration quality (lower is better, so negate)
         if len(window_calibrations) > 0:
@@ -283,9 +289,10 @@ def evaluate_consistency_fitness(individual):
         
         # Combined fitness: prioritize Sharpe ratio and mean ROI, with calibration bonus
         # Sharpe ratio ensures consistency, mean ROI ensures profitability
+        # Both are capped to prevent fitness explosion from extreme values
         fitness = (
-            0.4 * sharpe +  # Consistency (reward/risk)
-            0.3 * mean_roi +  # Absolute performance
+            0.4 * sharpe +  # Consistency (reward/risk) - capped at 20
+            0.3 * capped_mean_roi +  # Absolute performance - capped at 100
             0.2 * trend_bonus +  # Trend stability
             0.1 * (-calibration_penalty)  # Calibration quality
         )
@@ -347,15 +354,19 @@ def evaluate_sharpe_fitness(individual):
         mean_roi = np.mean(window_rois)
         std_roi = np.std(window_rois)
         
-        # Pure Sharpe ratio with epsilon protection
-        if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):
-            sharpe = mean_roi if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
-        else:
-            sharpe = mean_roi / std_roi
+        # Cap mean_roi to prevent fitness explosion
+        capped_mean_roi = min(mean_roi, MAX_MEAN_ROI) if mean_roi > 0 else mean_roi
         
-        # Small bonus for positive mean ROI
+        # Pure Sharpe ratio with epsilon protection
+        # Cap Sharpe ratio to prevent fitness explosion
+        if std_roi < EPSILON_THRESHOLD or not np.isfinite(std_roi):
+            sharpe = min(MAX_SHARPE_RATIO, mean_roi / EPSILON_THRESHOLD) if (mean_roi > 0 and np.isfinite(mean_roi)) else MIN_FITNESS
+        else:
+            sharpe = min(MAX_SHARPE_RATIO, mean_roi / std_roi)  # Cap even for normal std values
+        
+        # Small bonus for positive mean ROI (using capped value)
         if mean_roi > 0:
-            sharpe += 0.1 * mean_roi
+            sharpe += 0.1 * capped_mean_roi
         
         if not np.isfinite(sharpe):
             return (MIN_FITNESS,)
@@ -715,28 +726,47 @@ Examples:
     # OOS metrics (if available)
     try:
         df_oos = pd.read_csv('data/past3_events.csv', low_memory=False)
+        
+        # Normalize column names to uppercase for consistency
+        column_mapping = {
+            'date': 'DATE',
+            'fighter': 'FIGHTER',
+            'opp_fighter': 'opp_FIGHTER'
+        }
+        df_oos = df_oos.rename(columns=column_mapping)
+        
+        # Ensure required columns exist
+        if 'DATE' not in df_oos.columns or 'FIGHTER' not in df_oos.columns or 'opp_FIGHTER' not in df_oos.columns:
+            raise ValueError(f"OOS file missing required columns. Found: {list(df_oos.columns)}")
+        
         df_oos['DATE'] = pd.to_datetime(df_oos['DATE'])
         df_oos = df_oos.sort_values('DATE').reset_index(drop=True)
         
-        # Add bout counts if not already present
-        df_oos = add_bout_counts(df_oos)
+        # Check which fighters are present in training data
+        # Only evaluate fights where BOTH fighters have trained Elo ratings
+        df_oos['fighter_in_training'] = df_oos['FIGHTER'].isin(ratings.keys())
+        df_oos['opp_fighter_in_training'] = df_oos['opp_FIGHTER'].isin(ratings.keys())
+        df_oos['both_fighters_known'] = df_oos['fighter_in_training'] & df_oos['opp_fighter_in_training']
         
-        # Ensure bout count columns are numeric
-        df_oos['precomp_boutcount'] = pd.to_numeric(df_oos['precomp_boutcount'], errors='coerce').fillna(0).astype(int)
-        df_oos['opp_precomp_boutcount'] = pd.to_numeric(df_oos['opp_precomp_boutcount'], errors='coerce').fillna(0).astype(int)
+        # Filter to only fights where both fighters are in training data
+        df_oos_eval = df_oos[df_oos['both_fighters_known']].copy()
         
-        # Merge with Elo ratings
-        df_oos['precomp_elo'] = df_oos['FIGHTER'].map(ratings).fillna(1500)
-        df_oos['opp_precomp_elo'] = df_oos['opp_FIGHTER'].map(ratings).fillna(1500)
+        if len(df_oos_eval) == 0:
+            raise ValueError("No OOS fights with both fighters present in training data")
+        
+        # Use final Elo ratings from training (postcomp_elo equivalent)
+        df_oos_eval['precomp_elo'] = df_oos_eval['FIGHTER'].map(ratings)
+        df_oos_eval['opp_precomp_elo'] = df_oos_eval['opp_FIGHTER'].map(ratings)
         
         # Calculate win probabilities
-        df_oos['rating_diff'] = (df_oos['opp_precomp_elo'] - df_oos['precomp_elo']) / 400
-        df_oos['rating_diff'] = df_oos['rating_diff'].clip(-100, 100)
-        df_oos['win_prob'] = 1 / (1 + 10 ** df_oos['rating_diff'])
+        df_oos_eval['rating_diff'] = (df_oos_eval['opp_precomp_elo'] - df_oos_eval['precomp_elo']) / 400
+        df_oos_eval['rating_diff'] = df_oos_eval['rating_diff'].clip(-100, 100)
+        df_oos_eval['win_prob'] = 1 / (1 + 10 ** df_oos_eval['rating_diff'])
         
-        oos_roi, oos_n = calculate_window_roi(None, df_oos)
+        # Calculate OOS ROI using market odds if available
+        oos_roi, oos_n = calculate_window_roi(df_oos_eval, df_oos_eval)
         
-        df_oos_eval = df_oos[(df_oos['precomp_boutcount'] > 1) & (df_oos['opp_precomp_boutcount'] > 1)].copy()
+        # Calculate OOS accuracy
         oos_acc = ((df_oos_eval['result'] == (df_oos_eval['win_prob'] > 0.5).astype(int)).sum() / 
                    len(df_oos_eval) * 100) if len(df_oos_eval) > 0 else 0
         
@@ -744,6 +774,8 @@ Examples:
         print(f"  ROI: {oos_roi:.2f}%")
         print(f"  Accuracy: {oos_acc:.2f}%")
         print(f"  Fights evaluated: {oos_n}")
+        print(f"  Fighters in training: {df_oos['fighter_in_training'].sum()} / {len(df_oos)} primary fighters")
+        print(f"  Both fighters known: {df_oos['both_fighters_known'].sum()} / {len(df_oos)} fights")
         print(f"\n  Validation-OOS gap: {abs(val_roi - oos_roi):.2f}%")
         
     except Exception as e:

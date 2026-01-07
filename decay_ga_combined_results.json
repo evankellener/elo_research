@@ -1,0 +1,34 @@
+{
+  "optimization_type": "combined_ga",
+  "optimization_mode": "combined",
+  "best_parameters": {
+    "generation": 1,
+    "fitness": 25.516844272575142,
+    "quick_succession_days": 65.12224828305762,
+    "quick_succession_bump": 1.0218756805328266,
+    "decay_days": 444.0557879693352,
+    "decay_rate": 0.0022285009703768943
+  },
+  "validation_performance": {
+    "roi": 177.5980285329775,
+    "accuracy": 59.84251968503938,
+    "ece": 0.13859082905851244,
+    "brier": 0.25043178595494,
+    "n_fights": 352
+  },
+  "oos_performance": {
+    "roi": -18.209094706809232,
+    "accuracy": 61.29032258064516,
+    "n_fights": 62
+  },
+  "generation_history": [
+    {
+      "generation": 1,
+      "fitness": 25.516844272575142,
+      "quick_succession_days": 65.12224828305762,
+      "quick_succession_bump": 1.0218756805328266,
+      "decay_days": 444.0557879693352,
+      "decay_rate": 0.0022285009703768943
+    }
+  ]
+}
